@@ -27,7 +27,7 @@ func (e *env) marshal(name string, v *Value) string {
 		"marshal": v.marshalContainer(true),
 		"offset":  "",
 	}
-	if !v.isFixed() {
+	if !v.isFixed() && !(v.t.String() == "list" || v.t.String() == "bytes") {
 		// offset is the position where the offset starts
 		data["offset"] = fmt.Sprintf("offset := int(%d)\n", v.n)
 	}
