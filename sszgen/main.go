@@ -853,7 +853,7 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 			continue
 		}
 		name := f.Names[0].Name
-		if !isExportedField(name) {
+		if !isExportedField(name) && !hasGenTag(f) {
 			continue
 		}
 		if strings.HasPrefix(name, "XXX_") {
@@ -887,6 +887,10 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 		}
 	}
 	return v, nil
+}
+
+func hasGenTag(f *ast.Field) bool {
+	return f.Tag != nil && strings.Contains(f.Tag.Value, "ssz-gen")
 }
 
 func getObjLen(obj *ast.ArrayType) uint64 {
