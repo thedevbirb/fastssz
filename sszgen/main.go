@@ -409,6 +409,7 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 			getTree = e.getTree(name, obj)
 		}
 		if obj.hasCustomHashTreeRoot {
+			panic("htr")
 			objs = append(objs, &Obj{
 				HashTreeRoot: "",
 				GetTree:      getTree,
@@ -736,7 +737,6 @@ func (e *env) generateIR() error {
 			if !ok {
 				return fmt.Errorf("cannot find %s struct", name)
 			}
-			panic(name)
 			v.hasCustomHashTreeRoot = true
 		}
 		return nil
