@@ -189,6 +189,7 @@ type Value struct {
 	ref string
 	// new determines if the value is a pointer
 	noPtr bool
+	hasCustomHashTreeRoot bool
 }
 
 func (v *Value) isListElem() bool {
@@ -407,13 +408,23 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		if experimental {
 			getTree = e.getTree(name, obj)
 		}
-		objs = append(objs, &Obj{
-			HashTreeRoot: e.hashTreeRoot(name, obj),
-			GetTree:      getTree,
-			Marshal:      e.marshal(name, obj),
-			Unmarshal:    e.unmarshal(name, obj),
-			Size:         e.size(name, obj),
-		})
+		if obj.hasCustomHashTreeRoot {
+			objs = append(objs, &Obj{
+				HashTreeRoot: "",
+				GetTree:      getTree,
+				Marshal:      e.marshal(name, obj),
+				Unmarshal:    e.unmarshal(name, obj),
+				Size:         e.size(name, obj),
+			})
+		} else {
+			objs = append(objs, &Obj{
+				HashTreeRoot: e.hashTreeRoot(name, obj),
+				GetTree:      getTree,
+				Marshal:      e.marshal(name, obj),
+				Unmarshal:    e.unmarshal(name, obj),
+				Size:         e.size(name, obj),
+			})
+		}
 	}
 	if len(objs) == 0 {
 		// No valid objects found for this file
@@ -507,23 +518,25 @@ type astStruct struct {
 	packName string
 	typ      ast.Expr
 	implFunc bool
+	hasCustomHashTreeRoot bool
 	isRef    bool
 }
 
 type astResult struct {
-	objs     []*astStruct
-	funcs    []string
-	packName string
-	hasHashTreeRoot []string
+	objs               []*astStruct
+	funcs              []string
+	packName           string
+	customHashTreeRoot []string
 }
 
 func decodeASTStruct(file *ast.File) *astResult {
 	packName := file.Name.String()
 
 	res := &astResult{
-		objs:     []*astStruct{},
-		funcs:    []string{},
-		packName: packName,
+		objs:               []*astStruct{},
+		funcs:              []string{},
+		customHashTreeRoot: []string{},
+		packName:           packName,
 	}
 
 	funcRefs := map[string]int{}
@@ -563,8 +576,7 @@ func decodeASTStruct(file *ast.File) *astResult {
 						funcRefs[objName]++
 					}
 					if funcDecl.Name.Name == "HashTreeRoot" {
-						res.hasHashTreeRoot = append(res.hasHashTreeRoot, objName)
-						fmt.Print(objName)
+						res.customHashTreeRoot = append(res.customHashTreeRoot, objName)
 					}
 				}
 			}
@@ -719,6 +731,13 @@ func (e *env) generateIR() error {
 			}
 			v.implFunc = true
 		}
+		for _, name := range res.customHashTreeRoot {
+			v, ok := checkObjByPackage(res.packName, name)
+			if !ok {
+				return fmt.Errorf("cannot find %s struct", name)
+			}
+			v.hasCustomHashTreeRoot = true
+		}
 		return nil
 	}
 
@@ -829,7 +848,7 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		}
 		if raw.implFunc {
 			size, _ := getTagsInt(tags, "ssz-size")
-			v = &Value{t: TypeReference, s: size, n: size, noPtr: raw.obj == nil}
+			v = &Value{t: TypeReference, s: size, n: size, noPtr: raw.obj == nil, hasCustomHashTreeRoot: raw.hasCustomHashTreeRoot}
 		} else if raw.obj != nil {
 			v, err = e.parseASTStructType(name, raw.obj)
 		} else {
