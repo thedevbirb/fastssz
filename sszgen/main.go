@@ -514,6 +514,7 @@ type astResult struct {
 	objs     []*astStruct
 	funcs    []string
 	packName string
+	hasHashTreeRoot []string
 }
 
 func decodeASTStruct(file *ast.File) *astResult {
@@ -560,6 +561,10 @@ func decodeASTStruct(file *ast.File) *astResult {
 					objName := i.Name
 					if ok := isFuncDecl(funcDecl); ok {
 						funcRefs[objName]++
+					}
+					if funcDecl.Name.Name == "HashTreeRoot" {
+						res.hasHashTreeRoot = append(res.hasHashTreeRoot, objName)
+						fmt.Print(objName)
 					}
 				}
 			}
