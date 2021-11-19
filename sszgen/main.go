@@ -576,6 +576,7 @@ func decodeASTStruct(file *ast.File) *astResult {
 						funcRefs[objName]++
 					}
 					if funcDecl.Name.Name == "HashTreeRoot" {
+						panic(funcDecl.Name.Name)
 						res.customHashTreeRoot = append(res.customHashTreeRoot, objName)
 					}
 				}
