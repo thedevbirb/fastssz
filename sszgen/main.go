@@ -576,7 +576,6 @@ func decodeASTStruct(file *ast.File) *astResult {
 						funcRefs[objName]++
 					}
 					if funcDecl.Name.Name == "HashTreeRoot" {
-						panic(funcDecl.Name.Name)
 						res.customHashTreeRoot = append(res.customHashTreeRoot, objName)
 					}
 				}
@@ -737,6 +736,7 @@ func (e *env) generateIR() error {
 			if !ok {
 				return fmt.Errorf("cannot find %s struct", name)
 			}
+			panic(name)
 			v.hasCustomHashTreeRoot = true
 		}
 		return nil
