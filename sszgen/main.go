@@ -68,7 +68,7 @@ func decodeTargets(input string) []generationTarget {
 			t.name = res[1]
 			t.opts = strings.Split(strings.TrimSpace(res[2]), ",")
 		}
-		targets[i]=t
+		targets[i] = t
 	}
 	return targets
 }
@@ -437,15 +437,15 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 			getTree = e.getTree(name, obj)
 		}
 		o := &Obj{
-			GetTree:      getTree,
-			Marshal:      e.marshal(name, obj),
-			Unmarshal:    e.unmarshal(name, obj),
-			Size:         e.size(name, obj),
+			GetTree:   getTree,
+			Marshal:   e.marshal(name, obj),
+			Unmarshal: e.unmarshal(name, obj),
+			Size:      e.size(name, obj),
 		}
 		if len(obj.opts) == 1 && obj.opts[0] == "no-htr" {
 			o.HashTreeRoot = ""
 		} else {
-			o.HashTreeRoot= e.hashTreeRoot(name, obj)
+			o.HashTreeRoot = e.hashTreeRoot(name, obj)
 		}
 		objs = append(objs, o)
 	}
@@ -464,7 +464,35 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		data["imports"] = importsStr
 	}
 
-	return execTmpl(tmpl, data), true, nil
+	result := execTmpl(tmpl, data)
+
+	importUsed := make(map[string]bool)
+	for _, i := range data["imports"].([]string) {
+		importUsed[i] = false
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "ssz.go", result, 0)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to parse template: %w", err)
+	}
+	ast.Inspect(f, func(node ast.Node) bool {
+		switch x := node.(type) {
+		case *ast.SelectorExpr:
+			s := fset.Position(x.X.Pos()).String()
+			_, ok := importUsed[s]
+			if ok {
+				importUsed[s] = true
+			}
+		}
+		return true
+	})
+	for i, b := range importUsed {
+		if b == false {
+			panic("import not used: "+i)
+		}
+	}
+
+	return result, true, nil
 }
 
 func isBasicType(v *Value) bool {
@@ -545,18 +573,18 @@ type astStruct struct {
 }
 
 type astResult struct {
-	objs               []*astStruct
-	funcs              []string
-	packName           string
+	objs     []*astStruct
+	funcs    []string
+	packName string
 }
 
 func decodeASTStruct(file *ast.File) *astResult {
 	packName := file.Name.String()
 
 	res := &astResult{
-		objs:               []*astStruct{},
-		funcs:              []string{},
-		packName:           packName,
+		objs:     []*astStruct{},
+		funcs:    []string{},
+		packName: packName,
 	}
 
 	funcRefs := map[string]int{}
