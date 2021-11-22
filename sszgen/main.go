@@ -465,6 +465,7 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 	}
 
 	result := execTmpl(tmpl, data)
+	panic(result)
 
 	importUsed := make(map[string]bool)
 	for _, i := range data["imports"].([]string) {
