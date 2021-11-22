@@ -475,12 +475,13 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 	if err != nil {
 		return "", false, fmt.Errorf("failed to parse template: %w", err)
 	}
-	counter :=0
 	ast.Inspect(f, func(node ast.Node) bool {
 		switch x := node.(type) {
 		case *ast.SelectorExpr:
 			s := result[x.X.Pos()-1:x.X.End()-1]
-			counter++
+			if s =="github_com_prysmaticlabs_eth2_types" {
+				panic("BOOM")
+			}
 			_, ok := importUsed[s]
 			if ok {
 				importUsed[s] = true
@@ -488,7 +489,6 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		}
 		return true
 	})
-	panic(strconv.Itoa(counter))
 	for i, b := range importUsed {
 		if b == false {
 			panic("import not used: "+i)
