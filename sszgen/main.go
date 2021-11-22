@@ -465,22 +465,22 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 	}
 
 	result := execTmpl(tmpl, data)
-	panic(result)
 
 	importUsed := make(map[string]bool)
 	for _, i := range data["imports"].([]string) {
 		importUsed[i] = false
 	}
-	panic(strings.Join(data["imports"].([]string), ","))
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "ssz.go", result, 0)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to parse template: %w", err)
 	}
+	counter :=0
 	ast.Inspect(f, func(node ast.Node) bool {
 		switch x := node.(type) {
 		case *ast.SelectorExpr:
 			s := result[x.X.Pos()-1:x.X.End()-1]
+			counter++
 			_, ok := importUsed[s]
 			if ok {
 				importUsed[s] = true
@@ -488,6 +488,7 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		}
 		return true
 	})
+	panic(strconv.Itoa(counter))
 	for i, b := range importUsed {
 		if b == false {
 			panic("import not used: "+i)
