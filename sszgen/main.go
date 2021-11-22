@@ -470,6 +470,7 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 	for _, i := range data["imports"].([]string) {
 		importUsed[i] = false
 	}
+	panic(strings.Join(data["imports"].([]string), ","))
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "ssz.go", result, 0)
 	if err != nil {
@@ -479,7 +480,6 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		switch x := node.(type) {
 		case *ast.SelectorExpr:
 			s := result[x.X.Pos()-1:x.X.End()-1]
-			panic(s)
 			_, ok := importUsed[s]
 			if ok {
 				importUsed[s] = true
