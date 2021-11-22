@@ -880,6 +880,7 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 			v = &Value{t: TypeReference, s: size, n: size, noPtr: raw.obj == nil}
 			target, ok := e.getTargetByName(name)
 			if ok {
+				panic("found target")
 				v.opts = target.opts
 			}
 		} else if raw.obj != nil {
