@@ -479,6 +479,7 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		switch x := node.(type) {
 		case *ast.SelectorExpr:
 			s := result[x.X.Pos()-1:x.X.End()-1]
+			panic(s)
 			_, ok := importUsed[s]
 			if ok {
 				importUsed[s] = true
