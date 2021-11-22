@@ -875,16 +875,9 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		if !ok {
 			return nil, fmt.Errorf("could not find struct with name '%s'", name)
 		}
-		if name == "BeaconState" {
-			panic("Implements funcs: "+strconv.FormatBool(raw.implFunc))
-		}
 		if raw.implFunc {
 			size, _ := getTagsInt(tags, "ssz-size")
 			v = &Value{t: TypeReference, s: size, n: size, noPtr: raw.obj == nil}
-			target, ok := e.getTargetByName(name)
-			if ok {
-				v.opts = target.opts
-			}
 		} else if raw.obj != nil {
 			v, err = e.parseASTStructType(name, raw.obj)
 		} else {
@@ -895,6 +888,10 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		}
 		v.name = name
 		v.obj = name
+		target, ok := e.getTargetByName(name)
+		if ok {
+			v.opts = target.opts
+		}
 		e.objs[name] = v
 	}
 	return v.copy(), nil
