@@ -872,7 +872,6 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 	if !ok {
 		var err error
 		raw, ok := e.getRawItemByName(name)
-		panic(name)
 		if !ok {
 			return nil, fmt.Errorf("could not find struct with name '%s'", name)
 		}
@@ -880,8 +879,10 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 			size, _ := getTagsInt(tags, "ssz-size")
 			v = &Value{t: TypeReference, s: size, n: size, noPtr: raw.obj == nil}
 			target, ok := e.getTargetByName(name)
+			if name == "BeaconState" {
+				panic("found BeaconState")
+			}
 			if ok {
-				panic("found target")
 				v.opts = target.opts
 			}
 		} else if raw.obj != nil {
