@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,11 @@ import (
 )
 
 const bytesPerLengthOffset = 4
+
+type generationTarget struct {
+	name string
+	opts []string
+}
 
 func main() {
 	var source string
@@ -37,8 +43,8 @@ func main() {
 
 	flag.Parse()
 
-	targets := decodeList(objsStr)
-	includeList := decodeList(include)
+	targets := decodeTargets(objsStr)
+	includeList := decodeIncludes(include)
 
 	if err := encode(source, targets, output, includeList, experimental); err != nil {
 		fmt.Printf("[ERR]: %v\n", err)
@@ -46,7 +52,28 @@ func main() {
 	}
 }
 
-func decodeList(input string) []string {
+func decodeTargets(input string) []generationTarget {
+	if input == "" {
+		return []generationTarget{}
+	}
+	raw := strings.Split(strings.TrimSpace(input), ",")
+	targets := make([]generationTarget, len(raw))
+	for i, v := range raw {
+		t := generationTarget{}
+		r := regexp.MustCompile(`(.*)\[(.*)]`)
+		res := r.FindStringSubmatch(v)
+		if len(res) == 0 {
+			t.name = v
+		} else {
+			t.name = res[1]
+			t.opts = strings.Split(strings.TrimSpace(res[2]), ",")
+		}
+		targets[i]=t
+	}
+	return targets
+}
+
+func decodeIncludes(input string) []string {
 	if input == "" {
 		return []string{}
 	}
@@ -59,7 +86,7 @@ func decodeList(input string) []string {
 // using the Value object.
 // 3. Use the IR to print the encoding functions
 
-func encode(source string, targets []string, output string, includePaths []string, experimental bool) error {
+func encode(source string, targets []generationTarget, output string, includePaths []string, experimental bool) error {
 	files, err := parseInput(source) // 1.
 	if err != nil {
 		return err
@@ -189,7 +216,8 @@ type Value struct {
 	ref string
 	// new determines if the value is a pointer
 	noPtr bool
-	hasCustomHashTreeRoot bool
+	// options
+	opts []string
 }
 
 func (v *Value) isListElem() bool {
@@ -282,7 +310,7 @@ type env struct {
 	// map of files with their structs in order
 	order map[string][]string
 	// target structures to encode
-	targets []string
+	targets []generationTarget
 	// imports in all the parsed packages
 	imports []*astImport
 }
@@ -408,8 +436,8 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		if experimental {
 			getTree = e.getTree(name, obj)
 		}
-		if obj.hasCustomHashTreeRoot {
-			panic("htr")
+		if len(obj.opts) == 1 && obj.opts[0] == "no-htr" {
+			panic("no-htr")
 			objs = append(objs, &Obj{
 				HashTreeRoot: "",
 				GetTree:      getTree,
@@ -519,7 +547,6 @@ type astStruct struct {
 	packName string
 	typ      ast.Expr
 	implFunc bool
-	hasCustomHashTreeRoot bool
 	isRef    bool
 }
 
@@ -527,7 +554,6 @@ type astResult struct {
 	objs               []*astStruct
 	funcs              []string
 	packName           string
-	customHashTreeRoot []string
 }
 
 func decodeASTStruct(file *ast.File) *astResult {
@@ -536,7 +562,6 @@ func decodeASTStruct(file *ast.File) *astResult {
 	res := &astResult{
 		objs:               []*astStruct{},
 		funcs:              []string{},
-		customHashTreeRoot: []string{},
 		packName:           packName,
 	}
 
@@ -575,9 +600,6 @@ func decodeASTStruct(file *ast.File) *astResult {
 					objName := i.Name
 					if ok := isFuncDecl(funcDecl); ok {
 						funcRefs[objName]++
-					}
-					if funcDecl.Name.Name == "HashTreeRoot" {
-						res.customHashTreeRoot = append(res.customHashTreeRoot, objName)
 					}
 				}
 			}
@@ -692,6 +714,15 @@ func (e *env) getRawItemByName(name string) (*astStruct, bool) {
 	return nil, false
 }
 
+func (e *env) getTargetByName(name string) (*generationTarget, bool) {
+	for _, item := range e.targets {
+		if item.name == name {
+			return &item, true
+		}
+	}
+	return nil, false
+}
+
 func (e *env) addRawItem(i *astStruct) {
 	e.raw = append(e.raw, i)
 }
@@ -731,13 +762,6 @@ func (e *env) generateIR() error {
 				return fmt.Errorf("cannot find %s struct", name)
 			}
 			v.implFunc = true
-		}
-		for _, name := range res.customHashTreeRoot {
-			v, ok := checkObjByPackage(res.packName, name)
-			if !ok {
-				return fmt.Errorf("cannot find %s struct", name)
-			}
-			v.hasCustomHashTreeRoot = true
 		}
 		return nil
 	}
@@ -815,7 +839,11 @@ func (e *env) generateIR() error {
 		if e.targets == nil || len(e.targets) == 0 {
 			valid = true
 		} else {
-			valid = contains(name, e.targets)
+			names := make([]string, len(e.targets))
+			for i, t := range e.targets {
+				names[i] = t.name
+			}
+			valid = contains(name, names)
 		}
 		if valid {
 			if obj.isRef {
@@ -847,9 +875,13 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		if !ok {
 			return nil, fmt.Errorf("could not find struct with name '%s'", name)
 		}
+		target, ok := e.getTargetByName(name)
+		if !ok {
+			return nil, fmt.Errorf("could not find struct with name '%s'", name)
+		}
 		if raw.implFunc {
 			size, _ := getTagsInt(tags, "ssz-size")
-			v = &Value{t: TypeReference, s: size, n: size, noPtr: raw.obj == nil, hasCustomHashTreeRoot: raw.hasCustomHashTreeRoot}
+			v = &Value{t: TypeReference, s: size, n: size, noPtr: raw.obj == nil, opts: target.opts}
 		} else if raw.obj != nil {
 			v, err = e.parseASTStructType(name, raw.obj)
 		} else {
