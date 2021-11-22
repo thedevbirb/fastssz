@@ -832,6 +832,7 @@ func (e *env) generateIR() error {
 		}
 	}
 
+	names := make([]string,0)
 	for _, obj := range e.raw {
 		name := obj.name
 
@@ -850,11 +851,13 @@ func (e *env) generateIR() error {
 				// do not process imported elements
 				continue
 			}
+			names = append(names, name)
 			if _, err := e.encodeItem(name, ""); err != nil {
 				return err
 			}
 		}
 	}
+	panic(strings.Join(names,","))
 	return nil
 }
 
