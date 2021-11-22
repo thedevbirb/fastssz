@@ -832,7 +832,6 @@ func (e *env) generateIR() error {
 		}
 	}
 
-	names := make([]string,0)
 	for _, obj := range e.raw {
 		name := obj.name
 
@@ -851,13 +850,11 @@ func (e *env) generateIR() error {
 				// do not process imported elements
 				continue
 			}
-			names = append(names, name)
 			if _, err := e.encodeItem(name, ""); err != nil {
 				return err
 			}
 		}
 	}
-	panic(strings.Join(names,","))
 	return nil
 }
 
@@ -878,13 +875,13 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		if !ok {
 			return nil, fmt.Errorf("could not find struct with name '%s'", name)
 		}
+		if name == "BeaconState" {
+			panic("Implements funcs: "+strconv.FormatBool(raw.implFunc))
+		}
 		if raw.implFunc {
 			size, _ := getTagsInt(tags, "ssz-size")
 			v = &Value{t: TypeReference, s: size, n: size, noPtr: raw.obj == nil}
 			target, ok := e.getTargetByName(name)
-			if name == "BeaconState" {
-				panic("found BeaconState")
-			}
 			if ok {
 				v.opts = target.opts
 			}
