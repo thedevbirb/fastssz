@@ -873,6 +873,7 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		var err error
 		raw, ok := e.getRawItemByName(name)
 		if !ok {
+			panic(name)
 			return nil, fmt.Errorf("could not find struct with name '%s'", name)
 		}
 		if raw.implFunc {
