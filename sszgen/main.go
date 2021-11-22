@@ -478,7 +478,7 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 	ast.Inspect(f, func(node ast.Node) bool {
 		switch x := node.(type) {
 		case *ast.SelectorExpr:
-			s := fset.Position(x.X.Pos()).String()
+			s := result[x.X.Pos()-1:x.X.End()-1]
 			_, ok := importUsed[s]
 			if ok {
 				importUsed[s] = true
