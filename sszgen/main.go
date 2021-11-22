@@ -437,7 +437,6 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 			getTree = e.getTree(name, obj)
 		}
 		if len(obj.opts) == 1 && obj.opts[0] == "no-htr" {
-			panic("no-htr")
 			objs = append(objs, &Obj{
 				HashTreeRoot: "",
 				GetTree:      getTree,
