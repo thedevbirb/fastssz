@@ -464,22 +464,31 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		data["imports"] = importsStr
 	}
 
-	result := execTmpl(tmpl, data)
+	code := execTmpl(tmpl, data)
 
+	result, err := removeUnusedImports(code, data["imports"].([]string))
+	if err != nil {
+		return "", false, err
+	}
+
+	return result, true, nil
+}
+
+func removeUnusedImports(code string, imports []string) (string,error){
 	importUsed := make(map[string]bool)
-	for _, i := range data["imports"].([]string) {
+	for _, i := range imports {
 		// Import is of the form 'alias path'. We need only the alias.
 		importUsed[strings.Split(i, " ")[0]] = false
 	}
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "ssz.go", result, 0)
+	f, err := parser.ParseFile(fset, "ssz.go", code, 0)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to parse template: %w", err)
+		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
 	ast.Inspect(f, func(node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.SelectorExpr:
-			s := result[n.X.Pos()-1:n.X.End()-1]
+			s := code[n.X.Pos()-1:n.X.End()-1]
 			_, ok := importUsed[s]
 			if ok {
 				importUsed[s] = true
@@ -494,14 +503,14 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 			for i, used := range importUsed {
 				if name == i && !used {
 					// Add 1 to n.End() to remove trailing newline.
-					// result = result[:n.Pos()-2]+result[n.End()+1:]
+					code = code[:n.Pos()-2]+code[n.End()+1:]
 				}
 			}
 		}
 		return true
 	})
 
-	return result, true, nil
+	return code, nil
 }
 
 func isBasicType(v *Value) bool {
