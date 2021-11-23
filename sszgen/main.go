@@ -468,8 +468,8 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 
 	importUsed := make(map[string]bool)
 	for _, i := range data["imports"].([]string) {
-		panic(i)
-		importUsed[i] = false
+		// Import is of the form 'alias path'. We need only the alias.
+		importUsed[strings.Split(i, " ")[0]] = false
 	}
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "ssz.go", result, 0)
@@ -480,13 +480,13 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		switch x := node.(type) {
 		case *ast.SelectorExpr:
 			s := result[x.X.Pos()-1:x.X.End()-1]
-			if s == "github_com_prysmaticlabs_eth2_types" {
+/*			if s == "github_com_prysmaticlabs_eth2_types" {
 				_, ok := importUsed[s]
 				if ok {
 					panic("BOOM")
 					importUsed[s] = true
 				}
-			}
+			}*/
 			_, ok := importUsed[s]
 			if ok {
 				importUsed[s] = true
