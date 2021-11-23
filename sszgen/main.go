@@ -493,7 +493,8 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 			name := n.Name.String()
 			for i, used := range importUsed {
 				if name == i && !used {
-					result = result[:n.Pos()-2]+result[n.End():]
+					// Add 1 to n.End() to remove trailing newline.
+					result = result[:n.Pos()-2]+result[n.End()+1:]
 				}
 			}
 		}
