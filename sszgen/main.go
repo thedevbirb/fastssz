@@ -480,7 +480,11 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		case *ast.SelectorExpr:
 			s := result[x.X.Pos()-1:x.X.End()-1]
 			if s =="github_com_prysmaticlabs_eth2_types" {
-				panic("BOOM")
+				_, ok := importUsed[s]
+				if ok {
+					panic("BOOM")
+					importUsed[s] = true
+				}
 			}
 			_, ok := importUsed[s]
 			if ok {
