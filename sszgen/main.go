@@ -999,7 +999,7 @@ func getObjLen(obj *ast.ArrayType) uint64 {
 	if ok {
 		value = lit.Value
 	} else {
-		value = obj.Len.(*ast.Ident).Obj.Decl.(*ast.BasicLit).Value
+		value = obj.Len.(*ast.Ident).Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
 	}
 	num, err := strconv.ParseUint(value, 0, 64)
 	if err != nil {
