@@ -990,7 +990,7 @@ func hasGenTag(f *ast.Field) bool {
 	return f.Tag != nil && strings.Contains(f.Tag.Value, "ssz-gen")
 }
 
-func getObjLen(obj *ast.ArrayType) uint64 {
+func (e *env) getObjLen(obj *ast.ArrayType) uint64 {
 	if obj.Len == nil {
 		return 0
 	}
@@ -999,7 +999,22 @@ func getObjLen(obj *ast.ArrayType) uint64 {
 	if ok {
 		value = lit.Value
 	} else {
-		value = obj.Len.(*ast.Ident).Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+		constName := obj.Len.(*ast.Ident).Name
+		found := false
+		for _, f := range e.files {
+			ast.Inspect(f, func(node ast.Node) bool {
+				spec, ok := node.(*ast.ValueSpec)
+				if ok && spec.Names[0].Name == constName {
+					value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+					found =true
+					return false
+				}
+				return true
+			})
+			if found {
+				break
+			}
+		}
 	}
 	num, err := strconv.ParseUint(value, 0, 64)
 	if err != nil {
@@ -1040,7 +1055,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 
 	case *ast.ArrayType:
 		if isByte(obj.Elt) {
-			if fixedlen := getObjLen(obj); fixedlen != 0 {
+			if fixedlen := e.getObjLen(obj); fixedlen != 0 {
 				// array of fixed size
 				return &Value{t: TypeBytes, c: true, s: fixedlen, n: fixedlen}, nil
 			}
@@ -1066,7 +1081,7 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			return &Value{t: TypeBytes, m: max}, nil
 		}
 		if isArray(obj.Elt) && isByte(obj.Elt.(*ast.ArrayType).Elt) {
-			f, fCheck, s, sCheck, t, err := getRootSizes(obj, tags)
+			f, fCheck, s, sCheck, t, err := e.getRootSizes(obj, tags)
 			if err != nil {
 				return nil, err
 			}
@@ -1157,11 +1172,11 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 	}
 }
 
-func getRootSizes(obj *ast.ArrayType, tags string) (f uint64, fCheck bool, s uint64, sCheck bool, t Type, err error) {
+func (e *env) getRootSizes(obj *ast.ArrayType, tags string) (f uint64, fCheck bool, s uint64, sCheck bool, t Type, err error) {
 
 	// check if we are in an array and we get the sizes from there
-	f = getObjLen(obj)
-	s = getObjLen(obj.Elt.(*ast.ArrayType))
+	f = e.getObjLen(obj)
+	s = e.getObjLen(obj.Elt.(*ast.ArrayType))
 	t = TypeVector
 
 	if f != 0 {
