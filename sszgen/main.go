@@ -994,7 +994,13 @@ func getObjLen(obj *ast.ArrayType) uint64 {
 	if obj.Len == nil {
 		return 0
 	}
-	value := obj.Len.(*ast.BasicLit).Value
+	lit, ok := obj.Len.(*ast.BasicLit)
+	var value string
+	if ok {
+		value = lit.Value
+	} else {
+		value = obj.Len.(*ast.Ident).Obj.Decl.(*ast.BasicLit).Value
+	}
 	num, err := strconv.ParseUint(value, 0, 64)
 	if err != nil {
 		panic(fmt.Sprintf("BUG: Failed to convert to uint64 %s: %v", value, err))
