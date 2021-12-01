@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,11 @@ import (
 )
 
 const bytesPerLengthOffset = 4
+
+type generationTarget struct {
+	name string
+	opts []string
+}
 
 func main() {
 	var source string
@@ -37,8 +43,8 @@ func main() {
 
 	flag.Parse()
 
-	targets := decodeList(objsStr)
-	includeList := decodeList(include)
+	targets := decodeTargets(objsStr)
+	includeList := decodeIncludes(include)
 
 	if err := encode(source, targets, output, includeList, experimental); err != nil {
 		fmt.Printf("[ERR]: %v\n", err)
@@ -46,7 +52,28 @@ func main() {
 	}
 }
 
-func decodeList(input string) []string {
+func decodeTargets(input string) []generationTarget {
+	if input == "" {
+		return []generationTarget{}
+	}
+	raw := strings.Split(strings.TrimSpace(input), ",")
+	targets := make([]generationTarget, len(raw))
+	for i, v := range raw {
+		t := generationTarget{}
+		r := regexp.MustCompile(`(.*)\[(.*)]`)
+		res := r.FindStringSubmatch(v)
+		if len(res) == 0 {
+			t.name = v
+		} else {
+			t.name = res[1]
+			t.opts = strings.Split(strings.TrimSpace(res[2]), ",")
+		}
+		targets[i]=t
+	}
+	return targets
+}
+
+func decodeIncludes(input string) []string {
 	if input == "" {
 		return []string{}
 	}
@@ -59,7 +86,7 @@ func decodeList(input string) []string {
 // using the Value object.
 // 3. Use the IR to print the encoding functions
 
-func encode(source string, targets []string, output string, includePaths []string, experimental bool) error {
+func encode(source string, targets []generationTarget, output string, includePaths []string, experimental bool) error {
 	files, err := parseInput(source) // 1.
 	if err != nil {
 		return err
@@ -189,6 +216,8 @@ type Value struct {
 	ref string
 	// new determines if the value is a pointer
 	noPtr bool
+	// options
+	opts []string
 }
 
 func (v *Value) isListElem() bool {
@@ -281,7 +310,7 @@ type env struct {
 	// map of files with their structs in order
 	order map[string][]string
 	// target structures to encode
-	targets []string
+	targets []generationTarget
 	// imports in all the parsed packages
 	imports []*astImport
 }
@@ -407,13 +436,18 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		if experimental {
 			getTree = e.getTree(name, obj)
 		}
-		objs = append(objs, &Obj{
-			HashTreeRoot: e.hashTreeRoot(name, obj),
+		o := &Obj{
 			GetTree:      getTree,
 			Marshal:      e.marshal(name, obj),
 			Unmarshal:    e.unmarshal(name, obj),
 			Size:         e.size(name, obj),
-		})
+		}
+		if len(obj.opts) == 1 && obj.opts[0] == "no-htr" {
+			o.HashTreeRoot = ""
+		} else {
+			o.HashTreeRoot= e.hashTreeRoot(name, obj)
+		}
+		objs = append(objs, o)
 	}
 	if len(objs) == 0 {
 		// No valid objects found for this file
@@ -511,18 +545,18 @@ type astStruct struct {
 }
 
 type astResult struct {
-	objs     []*astStruct
-	funcs    []string
-	packName string
+	objs               []*astStruct
+	funcs              []string
+	packName           string
 }
 
 func decodeASTStruct(file *ast.File) *astResult {
 	packName := file.Name.String()
 
 	res := &astResult{
-		objs:     []*astStruct{},
-		funcs:    []string{},
-		packName: packName,
+		objs:               []*astStruct{},
+		funcs:              []string{},
+		packName:           packName,
 	}
 
 	funcRefs := map[string]int{}
@@ -674,6 +708,15 @@ func (e *env) getRawItemByName(name string) (*astStruct, bool) {
 	return nil, false
 }
 
+func (e *env) getTargetByName(name string) (*generationTarget, bool) {
+	for _, item := range e.targets {
+		if item.name == name {
+			return &item, true
+		}
+	}
+	return nil, false
+}
+
 func (e *env) addRawItem(i *astStruct) {
 	e.raw = append(e.raw, i)
 }
@@ -790,7 +833,11 @@ func (e *env) generateIR() error {
 		if e.targets == nil || len(e.targets) == 0 {
 			valid = true
 		} else {
-			valid = contains(name, e.targets)
+			names := make([]string, len(e.targets))
+			for i, t := range e.targets {
+				names[i] = t.name
+			}
+			valid = contains(name, names)
 		}
 		if valid {
 			if obj.isRef {
@@ -835,6 +882,10 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		}
 		v.name = name
 		v.obj = name
+		target, ok := e.getTargetByName(name)
+		if ok {
+			v.opts = target.opts
+		}
 		e.objs[name] = v
 	}
 	return v.copy(), nil
