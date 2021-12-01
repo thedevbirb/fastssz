@@ -68,7 +68,7 @@ func decodeTargets(input string) []generationTarget {
 			t.name = res[1]
 			t.opts = strings.Split(strings.TrimSpace(res[2]), ",")
 		}
-		targets[i]=t
+		targets[i] = t
 	}
 	return targets
 }
@@ -463,7 +463,53 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		data["imports"] = importsStr
 	}
 
-	return execTmpl(tmpl, data), true, nil
+	code := execTmpl(tmpl, data)
+
+	result, err := removeUnusedImports(code, data["imports"].([]string))
+	if err != nil {
+		return "", false, err
+	}
+
+	return result, true, nil
+}
+
+func removeUnusedImports(code string, imports []string) (string,error){
+	importUsed := make(map[string]bool)
+	for _, i := range imports {
+		// Import is of the form 'alias path'. We need only the alias.
+		importUsed[strings.Split(i, " ")[0]] = false
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "ssz.go", code, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+	ast.Inspect(f, func(node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.SelectorExpr:
+			s := code[n.X.Pos()-1:n.X.End()-1]
+			_, ok := importUsed[s]
+			if ok {
+				importUsed[s] = true
+			}
+		}
+		return true
+	})
+	ast.Inspect(f, func(node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.ImportSpec:
+			name := n.Name.String()
+			for i, used := range importUsed {
+				if name == i && !used {
+					// Add 1 to n.End() to remove trailing newline.
+					code = code[:n.Pos()-2]+code[n.End()+1:]
+				}
+			}
+		}
+		return true
+	})
+
+	return code, nil
 }
 
 func isBasicType(v *Value) bool {
@@ -544,18 +590,18 @@ type astStruct struct {
 }
 
 type astResult struct {
-	objs               []*astStruct
-	funcs              []string
-	packName           string
+	objs     []*astStruct
+	funcs    []string
+	packName string
 }
 
 func decodeASTStruct(file *ast.File) *astResult {
 	packName := file.Name.String()
 
 	res := &astResult{
-		objs:               []*astStruct{},
-		funcs:              []string{},
-		packName:           packName,
+		objs:     []*astStruct{},
+		funcs:    []string{},
+		packName: packName,
 	}
 
 	funcRefs := map[string]int{}
