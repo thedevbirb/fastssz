@@ -436,13 +436,17 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 		if experimental {
 			getTree = e.getTree(name, obj)
 		}
-		objs = append(objs, &Obj{
+		o := &Obj{
 			HashTreeRoot: e.hashTreeRoot(name, obj),
 			GetTree:      getTree,
 			Marshal:      e.marshal(name, obj),
 			Unmarshal:    e.unmarshal(name, obj),
 			Size:         e.size(name, obj),
-		})
+		}
+		if len(obj.opts) == 1 && obj.opts[0] == "no-htr" {
+			o.HashTreeRoot = ""
+		}
+		objs = append(objs, o)
 	}
 	if len(objs) == 0 {
 		// No valid objects found for this file
