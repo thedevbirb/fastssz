@@ -46,7 +46,7 @@ func main() {
 	flag.Parse()
 
 	targets := decodeTargets(objsStr)
-	includeList := decodeIncludes(include)
+	includeList := decodeList(include)
 	excludeTypeNames := make(map[string]bool)
 	for _, name := range decodeList(excludeObjs) {
 		excludeTypeNames[name] = true
@@ -79,7 +79,7 @@ func decodeTargets(input string) []generationTarget {
 	return targets
 }
 
-func decodeIncludes(input string) []string {
+func decodeList(input string) []string {
 	if input == "" {
 		return []string{}
 	}
@@ -484,7 +484,7 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 	return result, true, nil
 }
 
-func removeUnusedImports(code string, imports []string) (string,error){
+func removeUnusedImports(code string, imports []string) (string, error) {
 	importUsed := make(map[string]bool)
 	for _, i := range imports {
 		// Import is of the form 'alias path'. We need only the alias.
@@ -498,7 +498,7 @@ func removeUnusedImports(code string, imports []string) (string,error){
 	ast.Inspect(f, func(node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.SelectorExpr:
-			s := code[n.X.Pos()-1:n.X.End()-1]
+			s := code[n.X.Pos()-1 : n.X.End()-1]
 			_, ok := importUsed[s]
 			if ok {
 				importUsed[s] = true
@@ -513,7 +513,7 @@ func removeUnusedImports(code string, imports []string) (string,error){
 			for i, used := range importUsed {
 				if name == i && !used {
 					// Add 1 to n.End() to remove trailing newline.
-					code = code[:n.Pos()-2]+code[n.End()+1:]
+					code = code[:n.Pos()-2] + code[n.End()+1:]
 				}
 			}
 		}
@@ -990,53 +990,6 @@ func hasGenTag(f *ast.Field) bool {
 	return f.Tag != nil && strings.Contains(f.Tag.Value, "ssz-gen")
 }
 
-func (e *env) getObjLen(obj *ast.ArrayType) uint64 {
-	if obj.Len == nil {
-		return 0
-	}
-	lit, ok := obj.Len.(*ast.BasicLit)
-	var value string
-	if ok {
-		value = lit.Value
-	} else {
-		constName := obj.Len.(*ast.Ident).Name
-		found := false
-		for _, f := range e.files {
-			if found {
-				break
-			}
-			ast.Inspect(f, func(node ast.Node) bool {
-				spec, ok := node.(*ast.ValueSpec)
-				if ok && spec.Names[0].Name == constName {
-					value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
-					found =true
-					return false
-				}
-				return true
-			})
-		}
-		for _, f := range e.include {
-			if found {
-				break
-			}
-			ast.Inspect(f, func(node ast.Node) bool {
-				spec, ok := node.(*ast.ValueSpec)
-				if ok && spec.Names[0].Name == constName {
-					value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
-					found =true
-					return false
-				}
-				return true
-			})
-		}
-	}
-	num, err := strconv.ParseUint(value, 0, 64)
-	if err != nil {
-		panic(fmt.Sprintf("BUG: Failed to convert to uint64 %s: %v", value, err))
-	}
-	return num
-}
-
 // parse the Go AST field
 func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error) {
 	if tag, ok := getTags(tags, "ssz"); ok && tag == "-" {
@@ -1093,11 +1046,47 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			var astSize *uint64
 			// if .Len is nil, this is a slice, not a fixed length array
 			if collectionExpr.Len != nil {
+				var value string
 				arrayLen, ok := collectionExpr.Len.(*ast.BasicLit)
-				if !ok {
-					return nil, fmt.Errorf("failed to parse field %s. byte array definition not understood by go/ast", name)
+				if ok {
+					value = arrayLen.Value
+				} else {
+					constant, ok := obj.Len.(*ast.Ident)
+					if !ok {
+						return nil, fmt.Errorf("failed to parse field %s. byte array definition not understood by go/ast", name)
+					}
+					found := false
+					for _, f := range e.files {
+						if found {
+							break
+						}
+						ast.Inspect(f, func(node ast.Node) bool {
+							spec, ok := node.(*ast.ValueSpec)
+							if ok && spec.Names[0].Name == constant.Name {
+								value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+								found = true
+								return false
+							}
+							return true
+						})
+					}
+					for _, f := range e.include {
+						if found {
+							break
+						}
+						ast.Inspect(f, func(node ast.Node) bool {
+							spec, ok := node.(*ast.ValueSpec)
+							if ok && spec.Names[0].Name == constant.Name {
+								value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+								found = true
+								return false
+							}
+							return true
+						})
+					}
 				}
-				a, err := strconv.ParseUint(arrayLen.Value, 0, 64)
+				value = arrayLen.Value
+				a, err := strconv.ParseUint(value, 0, 64)
 				if err != nil {
 					return nil, fmt.Errorf("Could not parse array length for field %s", name)
 				}
@@ -1218,80 +1207,6 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 	default:
 		panic(fmt.Errorf("ast type '%s' not expected", reflect.TypeOf(expr)))
 	}
-}
-
-func (e *env) getRootSizes(obj *ast.ArrayType, tags string) (f uint64, fCheck bool, s uint64, sCheck bool, t Type, err error) {
-
-	// check if we are in an array and we get the sizes from there
-	f = e.getObjLen(obj)
-	s = e.getObjLen(obj.Elt.(*ast.ArrayType))
-	t = TypeVector
-
-	if f != 0 {
-		fCheck = true
-	}
-	if s != 0 {
-		sCheck = true
-	}
-
-	if f != 0 && s != 0 {
-		// all the sizes are set as arrays
-		return
-	}
-
-	if f != s {
-		// one of the values was not set as an array
-		// check 'ssz-size' for vector or 'ssz-max' for a list
-		size, ok := getTagsInt(tags, "ssz-size")
-		if !ok {
-			t = TypeList
-			size, ok = getTagsInt(tags, "ssz-max")
-			if !ok {
-				err = fmt.Errorf("bad")
-				return
-			}
-		}
-
-		// fill the missing size
-		if f == 0 {
-			f = size
-		} else {
-			s = size
-		}
-		return
-	}
-
-	// Neither of the values was set as an array, we need
-	// to get both sizes with the go tags
-	var ok bool
-	f, s, ok = getTagsTuple(tags, "ssz-size")
-	if !ok {
-		err = fmt.Errorf("[][]byte expects a ssz-size tag")
-		return
-	}
-	if f == 0 {
-		t = TypeList
-		f, ok = getTagsInt(tags, "ssz-max")
-		if !ok {
-			err = fmt.Errorf("ssz-max not set after '?' field on ssz-size")
-			return
-		}
-	}
-	return
-}
-
-func isArray(obj ast.Expr) bool {
-	_, ok := obj.(*ast.ArrayType)
-	return ok
-}
-
-func isByte(obj ast.Expr) bool {
-	if ident, ok := obj.(*ast.Ident); ok {
-		if ident.Name == "byte" {
-			return true
-		}
-	}
-	return false
 }
 
 func isExportedField(str string) bool {
