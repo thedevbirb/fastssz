@@ -34,9 +34,11 @@ func main() {
 	var output string
 	var include string
 	var experimental bool
+	var excludeObjs string
 
 	flag.StringVar(&source, "path", "", "")
 	flag.StringVar(&objsStr, "objs", "", "")
+	flag.StringVar(&excludeObjs, "exclude-objs", "", "Comma-separated list of types to exclude from output")
 	flag.StringVar(&output, "output", "", "")
 	flag.StringVar(&include, "include", "", "")
 	flag.BoolVar(&experimental, "experimental", false, "")
@@ -45,8 +47,12 @@ func main() {
 
 	targets := decodeTargets(objsStr)
 	includeList := decodeIncludes(include)
+	excludeTypeNames := make(map[string]bool)
+	for _, name := range decodeList(excludeObjs) {
+		excludeTypeNames[name] = true
+	}
 
-	if err := encode(source, targets, output, includeList, experimental); err != nil {
+	if err := encode(source, targets, output, includeList, excludeTypeNames, experimental); err != nil {
 		fmt.Printf("[ERR]: %v\n", err)
 		os.Exit(1)
 	}
@@ -86,7 +92,7 @@ func decodeIncludes(input string) []string {
 // using the Value object.
 // 3. Use the IR to print the encoding functions
 
-func encode(source string, targets []generationTarget, output string, includePaths []string, experimental bool) error {
+func encode(source string, targets []generationTarget, output string, includePaths []string, excludeTypeNames map[string]bool, experimental bool) error {
 	files, err := parseInput(source) // 1.
 	if err != nil {
 		return err
@@ -111,12 +117,13 @@ func encode(source string, targets []generationTarget, output string, includePat
 	}
 
 	e := &env{
-		include:  include,
-		source:   source,
-		files:    files,
-		objs:     map[string]*Value{},
-		packName: packName,
-		targets:  targets,
+		include:          include,
+		source:           source,
+		files:            files,
+		objs:             map[string]*Value{},
+		packName:         packName,
+		targets:          targets,
+		excludeTypeNames: excludeTypeNames,
 	}
 
 	if err := e.generateIR(); err != nil { // 2.
@@ -175,9 +182,10 @@ func parseInput(source string) (map[string]*ast.File, error) {
 			return nil, err
 		}
 		for _, v := range astFiles {
-			if !strings.HasSuffix(v.Name, "_test") {
-				files = v.Files
+			if strings.HasSuffix(v.Name, "_test") || v.Name == "ignore" {
+				continue
 			}
+			files = v.Files
 		}
 	} else {
 		// single file
@@ -197,8 +205,6 @@ type Value struct {
 	name string
 	// name of the Go object this value represents
 	obj string
-	// n is the fixed size of the value
-	n uint64
 	// auxiliary int number
 	s uint64
 	// type of the value
@@ -207,7 +213,7 @@ type Value struct {
 	o []*Value
 	// type of item for an array
 	e *Value
-	// auxiliary boolean
+	// array is fixed size. important for codegen to know so that code can be generated to interop with slices
 	c bool
 	// another auxiliary int number
 	m uint64
@@ -218,6 +224,8 @@ type Value struct {
 	noPtr bool
 	// options
 	opts []string
+	// isFixed allows us to explicitly mark fixed at parse time
+	fixed bool
 }
 
 func (v *Value) isListElem() bool {
@@ -250,14 +258,14 @@ func (v *Value) copy() *Value {
 type Type int
 
 const (
+	// TypeUndefined is a sentinel zero value to make initialization problems detectable
+	TypeUndefined Type = iota
 	// TypeUint is a SSZ int type
-	TypeUint Type = iota
+	TypeUint
 	// TypeBool is a SSZ bool type
 	TypeBool
 	// TypeBytes is a SSZ fixed or dynamic bytes type
 	TypeBytes
-	// TypeBitVector is a SSZ bitvector
-	TypeBitVector
 	// TypeBitList is a SSZ bitlist
 	TypeBitList
 	// TypeVector is a SSZ vector
@@ -272,14 +280,14 @@ const (
 
 func (t Type) String() string {
 	switch t {
+	case TypeUndefined:
+		return "undefined"
 	case TypeUint:
 		return "uint"
 	case TypeBool:
 		return "bool"
 	case TypeBytes:
 		return "bytes"
-	case TypeBitVector:
-		return "bitvector"
 	case TypeBitList:
 		return "bitlist"
 	case TypeVector:
@@ -313,6 +321,8 @@ type env struct {
 	targets []generationTarget
 	// imports in all the parsed packages
 	imports []*astImport
+	// excludeTypeNames is a map of type names to leave out of output
+	excludeTypeNames map[string]bool
 }
 
 const encodingPrefix = "_encoding.go"
@@ -331,7 +341,7 @@ func (e *env) generateOutputEncodings(output string, experimental bool) (map[str
 		orders = append(orders, e.order[k]...)
 	}
 
-	res, ok, err := e.print(true, orders, experimental)
+	res, ok, err := e.print(orders, experimental)
 	if err != nil {
 		return nil, err
 	}
@@ -345,19 +355,17 @@ func (e *env) generateOutputEncodings(output string, experimental bool) (map[str
 func (e *env) generateEncodings(experimental bool) (map[string]string, error) {
 	outs := map[string]string{}
 
-	firstDone := true
 	for name, order := range e.order {
 		// remove .go prefix and replace if with our own
 		ext := filepath.Ext(name)
 		name = strings.TrimSuffix(name, ext)
 		name += encodingPrefix
 
-		vvv, ok, err := e.print(firstDone, order, experimental)
+		vvv, ok, err := e.print(order, experimental)
 		if err != nil {
 			return nil, err
 		}
 		if ok {
-			firstDone = false
 			outs[name] = vvv
 		}
 	}
@@ -378,7 +386,7 @@ func (e *env) hashSource() (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-func (e *env) print(first bool, order []string, experimental bool) (string, bool, error) {
+func (e *env) print(order []string, experimental bool) (string, bool, error) {
 	hash, err := e.hashSource()
 	if err != nil {
 		return "", false, fmt.Errorf("failed to hash files: %v", err)
@@ -417,6 +425,9 @@ func (e *env) print(first bool, order []string, experimental bool) (string, bool
 
 	// Print the objects in the order in which they appear on the file.
 	for _, name := range order {
+		if exclude := e.excludeTypeNames[name]; exclude {
+			continue
+		}
 		obj, ok := e.objs[name]
 		if !ok {
 			continue
@@ -916,7 +927,7 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		}
 		if raw.implFunc {
 			size, _ := getTagsInt(tags, "ssz-size")
-			v = &Value{t: TypeReference, s: size, n: size, noPtr: raw.obj == nil}
+			v = &Value{t: TypeReference, s: size, noPtr: raw.obj == nil}
 		} else if raw.obj != nil {
 			v, err = e.parseASTStructType(name, raw.obj)
 		} else {
@@ -972,16 +983,6 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 		v.o = append(v.o, elem)
 	}
 
-	// get the total size of the container
-	for _, f := range v.o {
-		if f.isFixed() {
-			v.n += f.n
-		} else {
-			v.n += bytesPerLengthOffset
-			// container is dynamic
-			v.c = true
-		}
-	}
 	return v, nil
 }
 
@@ -1067,81 +1068,108 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 		}
 
 	case *ast.ArrayType:
-		if isByte(obj.Elt) {
-			if fixedlen := e.getObjLen(obj); fixedlen != 0 {
-				// array of fixed size
-				return &Value{t: TypeBytes, c: true, s: fixedlen, n: fixedlen}, nil
-			}
-			// []byte
-			if tag, ok := getTags(tags, "ssz"); ok && tag == "bitlist" {
-				// bitlist requires a ssz-max field
-				max, ok := getTagsInt(tags, "ssz-max")
-				if !ok {
-					return nil, fmt.Errorf("bitfield requires a 'ssz-max' field")
-				}
-				return &Value{t: TypeBitList, m: max, s: max}, nil
-			}
-			size, ok := getTagsInt(tags, "ssz-size")
-			if ok {
-				// fixed bytes
-				return &Value{t: TypeBytes, s: size, n: size}, nil
-			}
-			max, ok := getTagsInt(tags, "ssz-max")
-			if !ok {
-				return nil, fmt.Errorf("[]byte expects either ssz-max or ssz-size")
-			}
-			// dynamic bytes
-			return &Value{t: TypeBytes, m: max}, nil
-		}
-		if isArray(obj.Elt) && isByte(obj.Elt.(*ast.ArrayType).Elt) {
-			f, fCheck, s, sCheck, t, err := e.getRootSizes(obj, tags)
-			if err != nil {
-				return nil, err
-			}
-			if t == TypeVector {
-				// vector
-				return &Value{t: TypeVector, c: fCheck, n: f * s, s: f, e: &Value{t: TypeBytes, c: sCheck, n: s, s: s}}, nil
-			}
-			// list
-			return &Value{t: TypeList, s: f, e: &Value{t: TypeBytes, c: sCheck, n: s, s: s}}, nil
-		}
-
-		// []*Struct
-		elem, err := e.parseASTFieldType(name, tags, obj.Elt)
+		dims, err := extractSSZDimensions(tags)
 		if err != nil {
 			return nil, err
 		}
-		if size, ok := getTagsInt(tags, "ssz-size"); ok {
-			// fixed vector
-			v := &Value{t: TypeVector, s: size, e: elem}
-			if elem.isFixed() {
-				// set the total size
-				v.n = size * elem.n
-			}
-			return v, err
-		}
-		// list
-		maxSize, ok := getTagsInt(tags, "ssz-max")
-		if !ok {
-			return nil, fmt.Errorf("slice '%s' expects either ssz-max or ssz-size", name)
-		}
-		v := &Value{t: TypeList, e: elem, s: maxSize, m: maxSize}
-		return v, nil
 
+		collectionExpr := obj
+		outer := &Value{}
+		collection := outer
+		for _, dim := range dims {
+			if dim.IsVector() {
+				collection.t = TypeVector
+				collection.s = uint64(dim.VectorLen())
+			}
+			if dim.IsList() {
+				collection.t = TypeList
+				collection.m = uint64(dim.ListLen())
+				collection.s = uint64(dim.ListLen())
+			}
+
+			// If we're looking at a fixed-size array, attempt to grab the parsed size value. from go/ast
+			// Ellipsis node for [...]T array types, nil for slice types
+			// so when a `[]byte` expression is parsed, Len will be nil:
+			var astSize *uint64
+			// if .Len is nil, this is a slice, not a fixed length array
+			if collectionExpr.Len != nil {
+				arrayLen, ok := collectionExpr.Len.(*ast.BasicLit)
+				if !ok {
+					return nil, fmt.Errorf("failed to parse field %s. byte array definition not understood by go/ast", name)
+				}
+				a, err := strconv.ParseUint(arrayLen.Value, 0, 64)
+				if err != nil {
+					return nil, fmt.Errorf("Could not parse array length for field %s", name)
+				}
+				astSize = &a
+			}
+			if astSize != nil {
+				collection.c = true
+			}
+			if astSize != nil {
+				if collection.t != TypeVector {
+					return nil, fmt.Errorf("unexpected type for fixed size array, name=%s, type=%s", name, collection.t.String())
+				}
+				if collection.s != *astSize {
+					return nil, fmt.Errorf("Unexpected mismatch between ssz-size and array fixed size, name=%s, ssz-size=%d, fixed=%d", name, collection.s, *astSize)
+				}
+			}
+
+			switch eeType := collectionExpr.Elt.(type) {
+			case *ast.ArrayType:
+				// we expect there to a subsequent dimension when the element type is an ArrayType
+				// so we update the expression and value container in preparation for the next iteration
+				collectionExpr = eeType
+				collection.e = &Value{}
+				collection = collection.e
+				continue
+			case *ast.Ident:
+				// this condition is preserving the special nesting of byte,
+				// because byte has special handling in the code generator templates.
+				if eeType.Name == "byte" {
+					// note that we are overwriting the list/vector types and replacing them with TypeBytes
+					// TypeBytes can either be a list or vector (determined by looking at the isFixed result)
+					collection.t = TypeBytes
+					if dim.IsVector() {
+						// this is how we differentiate byte lists from byte vectors, rather than the usual approach
+						// of nesting a Value for the element within the .e attribute
+						collection.fixed = true
+					}
+					if dim.IsBitlist() {
+						collection.t = TypeBitList
+					}
+					continue
+				} else {
+					// anything else should recurse to the basic *ast.Ident case defined just below this ArrayType case
+					element, err := e.parseASTFieldType(name, tags, eeType)
+					if err != nil {
+						return nil, err
+					}
+					collection.e = element
+				}
+			default:
+				element, err := e.parseASTFieldType(name, tags, eeType)
+				if err != nil {
+					return nil, err
+				}
+				collection.e = element
+			}
+		}
+		return outer, nil
 	case *ast.Ident:
 		// basic type
 		var v *Value
 		switch obj.Name {
 		case "uint64":
-			v = &Value{t: TypeUint, n: 8}
+			v = &Value{t: TypeUint, s: 8}
 		case "uint32":
-			v = &Value{t: TypeUint, n: 4}
+			v = &Value{t: TypeUint, s: 4}
 		case "uint16":
-			v = &Value{t: TypeUint, n: 2}
+			v = &Value{t: TypeUint, s: 2}
 		case "uint8":
-			v = &Value{t: TypeUint, n: 1}
+			v = &Value{t: TypeUint, s: 1}
 		case "bool":
-			v = &Value{t: TypeBool, n: 1}
+			v = &Value{t: TypeBool, s: 1}
 		default:
 			// try to resolve as an alias
 			vv, err := e.encodeItem(obj.Name, tags)
@@ -1165,11 +1193,18 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			return &Value{t: TypeBitList, m: maxSize, s: maxSize}, nil
 		} else if strings.HasPrefix(sel, "Bitvector") {
 			// go-bitfield/Bitvector, fixed bytes
-			size, ok := getTagsInt(tags, "ssz-size")
-			if !ok {
-				return nil, fmt.Errorf("bitvector %s does not have ssz-size tag", name)
+			dims, err := extractSSZDimensions(tags)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse ssz-size tag for bitvector %s, err=%s", name, err)
 			}
-			return &Value{t: TypeBytes, s: size, n: size}, nil
+			if len(dims) < 1 {
+				return nil, fmt.Errorf("did not find any ssz tags for the bitvector named %s", name)
+			}
+			tailDim := dims[len(dims)-1] // get last value in case this value is nested within a List/Vector
+			if !tailDim.IsVector() {
+				return nil, fmt.Errorf("bitvector tag parse failed (no ssz-size for last dim) %s, err=%s", name, err)
+			}
+			return &Value{t: TypeBytes, fixed: true, s: uint64(tailDim.VectorLen())}, nil
 		}
 		// external reference
 		vv, err := e.encodeItem(sel, tags)
@@ -1263,38 +1298,6 @@ func isExportedField(str string) bool {
 	return str[0] <= 90
 }
 
-// getTagsTuple decodes tags of the format 'ssz-size:"33,32"'. If the
-// first value is '?' it returns -1.
-func getTagsTuple(str string, field string) (uint64, uint64, bool) {
-	tupleStr, ok := getTags(str, field)
-	if !ok {
-		return 0, 0, false
-	}
-
-	spl := strings.Split(tupleStr, ",")
-	if len(spl) != 2 {
-		return 0, 0, false
-	}
-
-	// first can be either ? or a number
-	var first uint64
-	if spl[0] == "?" {
-		first = 0
-	} else {
-		tmp, err := strconv.Atoi(spl[0])
-		if err != nil {
-			return 0, 0, false
-		}
-		first = uint64(tmp)
-	}
-
-	second, err := strconv.Atoi(spl[1])
-	if err != nil {
-		return 0, 0, false
-	}
-	return first, uint64(second), true
-}
-
 // getTagsInt returns tags of the format 'ssz-size:"32"'
 func getTagsInt(str string, field string) (uint64, bool) {
 	numStr, ok := getTags(str, field)
@@ -1337,42 +1340,46 @@ func getTags(str string, field string) (string, bool) {
 
 func (v *Value) isFixed() bool {
 	switch v.t {
+	// fixed size primitive types
+	case TypeUint, TypeBool:
+		return true
+	// dynamic collection types
+	case TypeList, TypeBitList:
+		return false
 	case TypeVector:
+		if v.e.t == TypeUndefined {
+			fmt.Printf("%s", v.name)
+		}
 		return v.e.isFixed()
-
 	case TypeBytes:
-		if v.s != 0 {
-			// fixed bytes
+		// we set this flag for all fixed size values of TypeBytes
+		// based on the presence of a corresponding ssz-size tag
+		if v.fixed {
 			return true
 		}
-		// dynamic bytes
+		// critical that we set this correctly since the zero-value is false
 		return false
-
 	case TypeContainer:
-		return !v.c
-
-	// Dynamic types
-	case TypeBitList:
-		fallthrough
-	case TypeList:
-		return false
-
-	// Fixed types
-	case TypeBitVector:
-		fallthrough
-	case TypeUint:
-		fallthrough
-	case TypeBool:
+		for _, f := range v.o {
+			if f.t == TypeUndefined {
+				fmt.Printf("%s %s", v.name, f.name)
+			}
+			// if any contained value is not fixed, it is not fixed
+			if !f.isFixed() {
+				return false
+			}
+		}
+		// if all values within the container are fixed, it is fixed
 		return true
-
 	case TypeReference:
 		if v.s != 0 {
 			return true
 		}
 		return false
-
 	default:
-		panic(fmt.Errorf("is fixed not implemented for type %s", v.t.String()))
+		// TypeUndefined should be the only type to fallthrough to this case
+		// TypeUndefined always means there is a fatal error in the parsing logic
+		panic(fmt.Errorf("is fixed not implemented for type %s named %s", v.t.String(), v.name))
 	}
 }
 
@@ -1392,7 +1399,7 @@ func uintVToName(v *Value) string {
 	if v.t != TypeUint {
 		panic("not expected")
 	}
-	switch v.n {
+	switch v.s {
 	case 8:
 		return "Uint64"
 	case 4:
@@ -1402,6 +1409,6 @@ func uintVToName(v *Value) string {
 	case 1:
 		return "Uint8"
 	default:
-		panic("not found")
+		panic(fmt.Sprintf("unknown uint size, %d bytes. field name=%s", v.s, v.name))
 	}
 }
