@@ -1085,7 +1085,6 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 						})
 					}
 				}
-				value = arrayLen.Value
 				a, err := strconv.ParseUint(value, 0, 64)
 				if err != nil {
 					return nil, fmt.Errorf("Could not parse array length for field %s", name)
