@@ -1052,37 +1052,70 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 					value = arrayLen.Value
 				} else {
 					constant, ok := obj.Len.(*ast.Ident)
-					if !ok {
-						return nil, fmt.Errorf("failed to parse field %s. byte array definition not understood by go/ast", name)
-					}
-					found := false
-					for _, f := range e.files {
-						if found {
-							break
-						}
-						ast.Inspect(f, func(node ast.Node) bool {
-							spec, ok := node.(*ast.ValueSpec)
-							if ok && spec.Names[0].Name == constant.Name {
-								value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
-								found = true
-								return false
+					if ok {
+						found := false
+						for _, f := range e.files {
+							if found {
+								break
 							}
-							return true
-						})
-					}
-					for _, f := range e.include {
-						if found {
-							break
+							ast.Inspect(f, func(node ast.Node) bool {
+								spec, ok := node.(*ast.ValueSpec)
+								if ok && spec.Names[0].Name == constant.Name {
+									value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+									found = true
+									return false
+								}
+								return true
+							})
 						}
-						ast.Inspect(f, func(node ast.Node) bool {
-							spec, ok := node.(*ast.ValueSpec)
-							if ok && spec.Names[0].Name == constant.Name {
-								value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
-								found = true
-								return false
+						for _, f := range e.include {
+							if found {
+								break
 							}
-							return true
-						})
+							ast.Inspect(f, func(node ast.Node) bool {
+								spec, ok := node.(*ast.ValueSpec)
+								if ok && spec.Names[0].Name == constant.Name {
+									value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+									found = true
+									return false
+								}
+								return true
+							})
+						}
+					} else {
+						externalConstant, ok := obj.Len.(*ast.SelectorExpr)
+						if !ok {
+							return nil, fmt.Errorf("failed to parse field %s. byte array definition not understood by go/ast", name)
+						}
+						found := false
+						for _, f := range e.files {
+							if found {
+								break
+							}
+							ast.Inspect(f, func(node ast.Node) bool {
+								spec, ok := node.(*ast.ValueSpec)
+								if ok && spec.Names[0].Name == externalConstant.Sel.Name {
+									value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+									found = true
+									return false
+								}
+								return true
+							})
+						}
+						for _, f := range e.include {
+							if found {
+								break
+							}
+							ast.Inspect(f, func(node ast.Node) bool {
+								spec, ok := node.(*ast.ValueSpec)
+								if ok && spec.Names[0].Name == externalConstant.Sel.Name {
+									value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+									found = true
+									return false
+								}
+								return true
+							})
+						}
 					}
 				}
 				a, err := strconv.ParseUint(value, 0, 64)
