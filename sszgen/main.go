@@ -10,6 +10,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"golang.org/x/tools/imports"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -421,7 +422,7 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 	}
 
 	objs := []*Obj{}
-	imports := []string{}
+	fileImports := []string{}
 
 	// Print the objects in the order in which they appear on the file.
 	for _, name := range order {
@@ -435,7 +436,7 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 
 		// detect the imports required to unmarshal this objects
 		refs := detectImports(obj)
-		imports = appendWithoutRepeated(imports, refs)
+		fileImports = appendWithoutRepeated(fileImports, refs)
 
 		if obj.isFixed() && isBasicType(obj) {
 			// we have an alias of a basic type (uint, bool). These objects
@@ -466,7 +467,7 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 	data["objs"] = objs
 
 	// insert any required imports
-	importsStr, err := e.buildImports(imports)
+	importsStr, err := e.buildImports(fileImports)
 	if err != nil {
 		return "", false, err
 	}
@@ -476,51 +477,12 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 
 	code := execTmpl(tmpl, data)
 
-	result, err := removeUnusedImports(code, data["imports"].([]string))
+	result, err := imports.Process("", []byte(code), nil)
 	if err != nil {
 		return "", false, err
 	}
 
-	return result, true, nil
-}
-
-func removeUnusedImports(code string, imports []string) (string, error) {
-	importUsed := make(map[string]bool)
-	for _, i := range imports {
-		// Import is of the form 'alias path'. We need only the alias.
-		importUsed[strings.Split(i, " ")[0]] = false
-	}
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "ssz.go", code, 0)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse template: %w", err)
-	}
-	ast.Inspect(f, func(node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.SelectorExpr:
-			s := code[n.X.Pos()-1 : n.X.End()-1]
-			_, ok := importUsed[s]
-			if ok {
-				importUsed[s] = true
-			}
-		}
-		return true
-	})
-	ast.Inspect(f, func(node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.ImportSpec:
-			name := n.Name.String()
-			for i, used := range importUsed {
-				if name == i && !used {
-					// Add 1 to n.End() to remove trailing newline.
-					code = code[:n.Pos()-2] + code[n.End()+1:]
-				}
-			}
-		}
-		return true
-	})
-
-	return code, nil
+	return string(result), true, nil
 }
 
 func isBasicType(v *Value) bool {
