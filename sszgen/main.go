@@ -449,7 +449,6 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 			getTree = e.getTree(name, obj)
 		}
 		o := &Obj{
-			HashTreeRoot: e.hashTreeRoot(name, obj),
 			GetTree:      getTree,
 			Marshal:      e.marshal(name, obj),
 			Unmarshal:    e.unmarshal(name, obj),
@@ -457,6 +456,8 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 		}
 		if len(obj.opts) == 1 && obj.opts[0] == "no-htr" {
 			o.HashTreeRoot = ""
+		} else {
+			o.HashTreeRoot = e.hashTreeRoot(name, obj)
 		}
 		objs = append(objs, o)
 	}
