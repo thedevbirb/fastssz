@@ -10,7 +10,6 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
-	"golang.org/x/tools/imports"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -20,10 +19,13 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+
+	"golang.org/x/tools/imports"
 )
 
 const bytesPerLengthOffset = 4
 
+// generationTarget allows defining options on target structs in the form of `StructName[option1,option2]`.
 type generationTarget struct {
 	name string
 	opts []string
@@ -449,10 +451,10 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 			getTree = e.getTree(name, obj)
 		}
 		o := &Obj{
-			GetTree:      getTree,
-			Marshal:      e.marshal(name, obj),
-			Unmarshal:    e.unmarshal(name, obj),
-			Size:         e.size(name, obj),
+			GetTree:   getTree,
+			Marshal:   e.marshal(name, obj),
+			Unmarshal: e.unmarshal(name, obj),
+			Size:      e.size(name, obj),
 		}
 		if len(obj.opts) == 1 && obj.opts[0] == "no-htr" {
 			o.HashTreeRoot = ""
@@ -1017,33 +1019,12 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 					constant, ok := obj.Len.(*ast.Ident)
 					if ok {
 						found := false
-						for _, f := range e.files {
-							if found {
-								break
+						value, found = findConstValue(e.files, constant.Name)
+						if !found {
+							value, found = findConstValue(e.include, constant.Name)
+							if !found {
+								return nil, fmt.Errorf("could not find value matching '%s'", constant.Name)
 							}
-							ast.Inspect(f, func(node ast.Node) bool {
-								spec, ok := node.(*ast.ValueSpec)
-								if ok && spec.Names[0].Name == constant.Name {
-									value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
-									found = true
-									return false
-								}
-								return true
-							})
-						}
-						for _, f := range e.include {
-							if found {
-								break
-							}
-							ast.Inspect(f, func(node ast.Node) bool {
-								spec, ok := node.(*ast.ValueSpec)
-								if ok && spec.Names[0].Name == constant.Name {
-									value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
-									found = true
-									return false
-								}
-								return true
-							})
 						}
 					} else {
 						externalConstant, ok := obj.Len.(*ast.SelectorExpr)
@@ -1051,33 +1032,12 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 							return nil, fmt.Errorf("failed to parse field %s. byte array definition not understood by go/ast", name)
 						}
 						found := false
-						for _, f := range e.files {
-							if found {
-								break
+						value, found = findConstValue(e.files, externalConstant.Sel.Name)
+						if !found {
+							value, found = findConstValue(e.include, externalConstant.Sel.Name)
+							if !found {
+								return nil, fmt.Errorf("could not find value matching '%s'", externalConstant.Sel.Name)
 							}
-							ast.Inspect(f, func(node ast.Node) bool {
-								spec, ok := node.(*ast.ValueSpec)
-								if ok && spec.Names[0].Name == externalConstant.Sel.Name {
-									value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
-									found = true
-									return false
-								}
-								return true
-							})
-						}
-						for _, f := range e.include {
-							if found {
-								break
-							}
-							ast.Inspect(f, func(node ast.Node) bool {
-								spec, ok := node.(*ast.ValueSpec)
-								if ok && spec.Names[0].Name == externalConstant.Sel.Name {
-									value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
-									found = true
-									return false
-								}
-								return true
-							})
 						}
 					}
 				}
@@ -1202,6 +1162,27 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 	default:
 		panic(fmt.Errorf("ast type '%s' not expected", reflect.TypeOf(expr)))
 	}
+}
+
+func findConstValue(files map[string]*ast.File, constName string) (string, bool) {
+	value := ""
+	found := false
+
+	for _, f := range files {
+		if found {
+			break
+		}
+		ast.Inspect(f, func(node ast.Node) bool {
+			spec, ok := node.(*ast.ValueSpec)
+			if ok && spec.Names[0].Name == constName {
+				value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+				found = true
+				return false
+			}
+			return true
+		})
+	}
+	return value, found
 }
 
 func isExportedField(str string) bool {
