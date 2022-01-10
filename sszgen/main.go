@@ -14,13 +14,22 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"text/template"
+
+	"golang.org/x/tools/imports"
 )
 
 const bytesPerLengthOffset = 4
+
+// generationTarget allows defining options on target structs in the form of `StructName[option1,option2]`.
+type generationTarget struct {
+	name string
+	opts []string
+}
 
 func main() {
 	var source string
@@ -39,7 +48,7 @@ func main() {
 
 	flag.Parse()
 
-	targets := decodeList(objsStr)
+	targets := decodeTargets(objsStr)
 	includeList := decodeList(include)
 	excludeTypeNames := make(map[string]bool)
 	for _, name := range decodeList(excludeObjs) {
@@ -50,6 +59,27 @@ func main() {
 		fmt.Printf("[ERR]: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func decodeTargets(input string) []generationTarget {
+	if input == "" {
+		return []generationTarget{}
+	}
+	raw := strings.Split(strings.TrimSpace(input), ",")
+	targets := make([]generationTarget, len(raw))
+	for i, v := range raw {
+		t := generationTarget{}
+		r := regexp.MustCompile(`(.*)\[(.*)]`)
+		res := r.FindStringSubmatch(v)
+		if len(res) == 0 {
+			t.name = v
+		} else {
+			t.name = res[1]
+			t.opts = strings.Split(strings.TrimSpace(res[2]), ",")
+		}
+		targets[i] = t
+	}
+	return targets
 }
 
 func decodeList(input string) []string {
@@ -65,7 +95,7 @@ func decodeList(input string) []string {
 // using the Value object.
 // 3. Use the IR to print the encoding functions
 
-func encode(source string, targets []string, output string, includePaths []string, excludeTypeNames map[string]bool, experimental bool) error {
+func encode(source string, targets []generationTarget, output string, includePaths []string, excludeTypeNames map[string]bool, experimental bool) error {
 	files, err := parseInput(source) // 1.
 	if err != nil {
 		return err
@@ -195,6 +225,8 @@ type Value struct {
 	ref string
 	// new determines if the value is a pointer
 	noPtr bool
+	// options
+	opts []string
 	// isFixed allows us to explicitly mark fixed at parse time
 	fixed bool
 }
@@ -289,7 +321,7 @@ type env struct {
 	// map of files with their structs in order
 	order map[string][]string
 	// target structures to encode
-	targets []string
+	targets []generationTarget
 	// imports in all the parsed packages
 	imports []*astImport
 	// excludeTypeNames is a map of type names to leave out of output
@@ -392,7 +424,7 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 	}
 
 	objs := []*Obj{}
-	imports := []string{}
+	fileImports := []string{}
 
 	// Print the objects in the order in which they appear on the file.
 	for _, name := range order {
@@ -406,7 +438,7 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 
 		// detect the imports required to unmarshal this objects
 		refs := detectImports(obj)
-		imports = appendWithoutRepeated(imports, refs)
+		fileImports = appendWithoutRepeated(fileImports, refs)
 
 		if obj.isFixed() && isBasicType(obj) {
 			// we have an alias of a basic type (uint, bool). These objects
@@ -418,13 +450,18 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 		if experimental {
 			getTree = e.getTree(name, obj)
 		}
-		objs = append(objs, &Obj{
-			HashTreeRoot: e.hashTreeRoot(name, obj),
-			GetTree:      getTree,
-			Marshal:      e.marshal(name, obj),
-			Unmarshal:    e.unmarshal(name, obj),
-			Size:         e.size(name, obj),
-		})
+		o := &Obj{
+			GetTree:   getTree,
+			Marshal:   e.marshal(name, obj),
+			Unmarshal: e.unmarshal(name, obj),
+			Size:      e.size(name, obj),
+		}
+		if len(obj.opts) == 1 && obj.opts[0] == "no-htr" {
+			o.HashTreeRoot = ""
+		} else {
+			o.HashTreeRoot = e.hashTreeRoot(name, obj)
+		}
+		objs = append(objs, o)
 	}
 	if len(objs) == 0 {
 		// No valid objects found for this file
@@ -433,7 +470,7 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 	data["objs"] = objs
 
 	// insert any required imports
-	importsStr, err := e.buildImports(imports)
+	importsStr, err := e.buildImports(fileImports)
 	if err != nil {
 		return "", false, err
 	}
@@ -441,7 +478,14 @@ func (e *env) print(order []string, experimental bool) (string, bool, error) {
 		data["imports"] = importsStr
 	}
 
-	return execTmpl(tmpl, data), true, nil
+	code := execTmpl(tmpl, data)
+
+	result, err := imports.Process("", []byte(code), nil)
+	if err != nil {
+		return "", false, err
+	}
+
+	return string(result), true, nil
 }
 
 func isBasicType(v *Value) bool {
@@ -685,6 +729,15 @@ func (e *env) getRawItemByName(name string) (*astStruct, bool) {
 	return nil, false
 }
 
+func (e *env) getTargetByName(name string) (*generationTarget, bool) {
+	for _, item := range e.targets {
+		if item.name == name {
+			return &item, true
+		}
+	}
+	return nil, false
+}
+
 func (e *env) addRawItem(i *astStruct) {
 	e.raw = append(e.raw, i)
 }
@@ -801,7 +854,11 @@ func (e *env) generateIR() error {
 		if e.targets == nil || len(e.targets) == 0 {
 			valid = true
 		} else {
-			valid = contains(name, e.targets)
+			names := make([]string, len(e.targets))
+			for i, t := range e.targets {
+				names[i] = t.name
+			}
+			valid = contains(name, names)
 		}
 		if valid {
 			if obj.isRef {
@@ -846,6 +903,10 @@ func (e *env) encodeItem(name, tags string) (*Value, error) {
 		}
 		v.name = name
 		v.obj = name
+		target, ok := e.getTargetByName(name)
+		if ok {
+			v.opts = target.opts
+		}
 		e.objs[name] = v
 	}
 	return v.copy(), nil
@@ -864,7 +925,7 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 			continue
 		}
 		name := f.Names[0].Name
-		if !isExportedField(name) {
+		if !isExportedField(name) && !hasGenTag(f) {
 			continue
 		}
 		if strings.HasPrefix(name, "XXX_") {
@@ -888,6 +949,10 @@ func (e *env) parseASTStructType(name string, typ *ast.StructType) (*Value, erro
 	}
 
 	return v, nil
+}
+
+func hasGenTag(f *ast.Field) bool {
+	return f.Tag != nil && strings.Contains(f.Tag.Value, "ssz-gen")
 }
 
 // parse the Go AST field
@@ -946,11 +1011,37 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 			var astSize *uint64
 			// if .Len is nil, this is a slice, not a fixed length array
 			if collectionExpr.Len != nil {
+				var value string
 				arrayLen, ok := collectionExpr.Len.(*ast.BasicLit)
-				if !ok {
-					return nil, fmt.Errorf("failed to parse field %s. byte array definition not understood by go/ast", name)
+				if ok {
+					value = arrayLen.Value
+				} else {
+					constant, ok := obj.Len.(*ast.Ident)
+					if ok {
+						found := false
+						value, found = findConstValue(e.files, constant.Name)
+						if !found {
+							value, found = findConstValue(e.include, constant.Name)
+							if !found {
+								return nil, fmt.Errorf("could not find value matching '%s'", constant.Name)
+							}
+						}
+					} else {
+						externalConstant, ok := obj.Len.(*ast.SelectorExpr)
+						if !ok {
+							return nil, fmt.Errorf("failed to parse field %s. byte array definition not understood by go/ast", name)
+						}
+						found := false
+						value, found = findConstValue(e.files, externalConstant.Sel.Name)
+						if !found {
+							value, found = findConstValue(e.include, externalConstant.Sel.Name)
+							if !found {
+								return nil, fmt.Errorf("could not find value matching '%s'", externalConstant.Sel.Name)
+							}
+						}
+					}
 				}
-				a, err := strconv.ParseUint(arrayLen.Value, 0, 64)
+				a, err := strconv.ParseUint(value, 0, 64)
 				if err != nil {
 					return nil, fmt.Errorf("Could not parse array length for field %s", name)
 				}
@@ -1071,6 +1162,27 @@ func (e *env) parseASTFieldType(name, tags string, expr ast.Expr) (*Value, error
 	default:
 		panic(fmt.Errorf("ast type '%s' not expected", reflect.TypeOf(expr)))
 	}
+}
+
+func findConstValue(files map[string]*ast.File, constName string) (string, bool) {
+	value := ""
+	found := false
+
+	for _, f := range files {
+		if found {
+			break
+		}
+		ast.Inspect(f, func(node ast.Node) bool {
+			spec, ok := node.(*ast.ValueSpec)
+			if ok && spec.Names[0].Name == constName {
+				value = spec.Names[0].Obj.Decl.(*ast.ValueSpec).Values[0].(*ast.BasicLit).Value
+				found = true
+				return false
+			}
+			return true
+		})
+	}
+	return value, found
 }
 
 func isExportedField(str string) bool {
