@@ -1,14 +1,14 @@
 package ssz
 
 import (
+	"encoding/binary"
 	"fmt"
 	"hash"
 	"math/bits"
 	"sync"
 
-	"encoding/binary"
-
 	"github.com/minio/sha256-simd"
+	"github.com/prysmaticlabs/gohashtree"
 )
 
 var (
@@ -22,6 +22,24 @@ var (
 var zeroHashes [65][32]byte
 var zeroHashLevels map[string]int
 var trueBytes, falseBytes []byte
+
+const (
+	mask0 = ^uint64((1 << (1 << iota)) - 1)
+	mask1
+	mask2
+	mask3
+	mask4
+	mask5
+)
+
+const (
+	bit0 = uint8(1 << iota)
+	bit1
+	bit2
+	bit3
+	bit4
+	bit5
+)
 
 func init() {
 	falseBytes = make([]byte, 32)
@@ -260,28 +278,24 @@ func (h *Hasher) Index() int {
 // Merkleize is used to merkleize the last group of the hasher
 func (h *Hasher) Merkleize(indx int) {
 	input := h.buf[indx:]
-
-	// merkleize the input
-	input = h.merkleizeImpl(input[:0], input, 0)
-	h.buf = append(h.buf[:indx], input...)
+	result := merkleizeInput(input, 0)
+	h.buf = append(h.buf[:indx], result...)
 }
 
 // MerkleizeWithMixin is used to merkleize the last group of the hasher
 func (h *Hasher) MerkleizeWithMixin(indx int, num, limit uint64) {
 	input := h.buf[indx:]
+	result := merkleizeInput(input, limit)
 
-	// merkleize the input
-	input = h.merkleizeImpl(input[:0], input, limit)
-
-	// mixin with the size
+	// mix in with the size
 	output := h.tmp[:32]
 	for indx := range output {
 		output[indx] = 0
 	}
 	MarshalUint64(output[:0], num)
+	result = h.doHash(result, result, output)
 
-	input = h.doHash(input, input, output)
-	h.buf = append(h.buf[:indx], input...)
+	h.buf = append(h.buf[:indx], result...)
 }
 
 // HashRoot creates the hash final hash root
@@ -414,4 +428,89 @@ func (h *Hasher) merkleizeImpl(dst []byte, input []byte, limit uint64) []byte {
 		res = h.doHash(res, res, zeroHashes[j][:])[:32]
 	}
 	return append(dst, res...)
+}
+
+func merkleizeInput(input []byte, limit uint64) []byte {
+	elemCount := len(input) / 32
+	elements := make([][32]byte, elemCount)
+	elemLen := len(elements)
+	for i, j := 0, 0; j < elemLen; i, j = i+32, j+1 {
+		if j == elemLen-1 {
+			copy(elements[j][:], input[i:])
+		} else {
+			copy(elements[j][:], input[i:i+32])
+		}
+	}
+
+	var result [32]byte
+	if limit == 0 {
+		result = merkleizeVector(elements, uint64(elemLen))
+	} else {
+		result = merkleizeVector(elements, limit)
+	}
+
+	return result[:]
+}
+
+// MerkleizeVector uses our optimized routine to hash a list of 32-byte
+// elements.
+func merkleizeVector(elements [][32]byte, length uint64) [32]byte {
+	dep := depth(length)
+	// Return zerohash at depth
+	if len(elements) == 0 {
+		return zeroHashesRaw[dep]
+	}
+	for i := uint8(0); i < dep; i++ {
+		layerLen := len(elements)
+		oddNodeLength := layerLen%2 == 1
+		if oddNodeLength {
+			zerohash := zeroHashesRaw[i]
+			elements = append(elements, zerohash)
+		}
+		outputLen := len(elements) / 2
+		err := gohashtree.Hash(elements, elements)
+		if err != nil {
+			panic(err)
+		}
+		elements = elements[:outputLen]
+	}
+	return elements[0]
+}
+
+// Depth retrieves the appropriate depth for the provided trie size.
+func depth(v uint64) (out uint8) {
+	// bitmagic: binary search through a uint32, offset down by 1 to not round powers of 2 up.
+	// Then adding 1 to it to not get the index of the first bit, but the length of the bits (depth of tree)
+	// Zero is a special case, it has a 0 depth.
+	// Example:
+	//  (in out): (0 0), (1 0), (2 1), (3 2), (4 2), (5 3), (6 3), (7 3), (8 3), (9 4)
+	if v <= 1 {
+		return 0
+	}
+	v--
+	if v&mask5 != 0 {
+		v >>= bit5
+		out |= bit5
+	}
+	if v&mask4 != 0 {
+		v >>= bit4
+		out |= bit4
+	}
+	if v&mask3 != 0 {
+		v >>= bit3
+		out |= bit3
+	}
+	if v&mask2 != 0 {
+		v >>= bit2
+		out |= bit2
+	}
+	if v&mask1 != 0 {
+		v >>= bit1
+		out |= bit1
+	}
+	if v&mask0 != 0 {
+		out |= bit0
+	}
+	out++
+	return
 }
