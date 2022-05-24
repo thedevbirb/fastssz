@@ -279,17 +279,37 @@ func (h *Hasher) Index() int {
 func (h *Hasher) Merkleize(indx int) {
 	input := h.buf[indx:]
 
-	// merkleize the input
-	input = h.merkleizeImpl(input[:0], input, 0)
-	h.buf = append(h.buf[:indx], input...)
+	elemCount := len(input) / 32
+	elements := make([][32]byte, elemCount)
+	elemLen := len(elements)
+	for i, j := 0, 0; j < elemLen; i, j = i+32, j+1 {
+		if j == elemLen-1 {
+			copy(elements[j][:], input[i:])
+		}
+		copy(elements[j][:], input[i:i+32])
+	}
+
+	result := merkleizeVector(elements, uint64(elemLen))
+
+	h.buf = append(h.buf[:indx], result[:]...)
 }
 
 // MerkleizeWithMixin is used to merkleize the last group of the hasher
 func (h *Hasher) MerkleizeWithMixin(indx int, num, limit uint64) {
 	input := h.buf[indx:]
 
-	// merkleize the input
-	input = h.merkleizeImpl(input[:0], input, limit)
+	elemCount := len(input) / 32
+	elements := make([][32]byte, elemCount)
+	elemLen := len(elements)
+	for i, j := 0, 0; j < elemLen; i, j = i+32, j+1 {
+		if j == elemLen-1 {
+			copy(elements[j][:], input[i:])
+		}
+		copy(elements[j][:], input[i:i+32])
+	}
+
+	result := merkleizeVector(elements, limit)
+	resultSlice := result[:]
 
 	// mixin with the size
 	output := h.tmp[:32]
@@ -298,8 +318,8 @@ func (h *Hasher) MerkleizeWithMixin(indx int, num, limit uint64) {
 	}
 	MarshalUint64(output[:0], num)
 
-	input = h.doHash(input, input, output)
-	h.buf = append(h.buf[:indx], input...)
+	input = h.doHash(resultSlice, resultSlice, output)
+	h.buf = append(h.buf[:indx], resultSlice...)
 }
 
 // HashRoot creates the hash final hash root
