@@ -437,8 +437,9 @@ func merkleizeInput(input []byte, limit uint64) []byte {
 	for i, j := 0, 0; j < elemLen; i, j = i+32, j+1 {
 		if j == elemLen-1 {
 			copy(elements[j][:], input[i:])
+		} else {
+			copy(elements[j][:], input[i:i+32])
 		}
-		copy(elements[j][:], input[i:i+32])
 	}
 
 	var result [32]byte
