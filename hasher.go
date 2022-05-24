@@ -278,48 +278,24 @@ func (h *Hasher) Index() int {
 // Merkleize is used to merkleize the last group of the hasher
 func (h *Hasher) Merkleize(indx int) {
 	input := h.buf[indx:]
-
-	elemCount := len(input) / 32
-	elements := make([][32]byte, elemCount)
-	elemLen := len(elements)
-	for i, j := 0, 0; j < elemLen; i, j = i+32, j+1 {
-		if j == elemLen-1 {
-			copy(elements[j][:], input[i:])
-		}
-		copy(elements[j][:], input[i:i+32])
-	}
-
-	result := merkleizeVector(elements, uint64(elemLen))
-
-	h.buf = append(h.buf[:indx], result[:]...)
+	result := merkleizeInput(input, 0)
+	h.buf = append(h.buf[:indx], result...)
 }
 
 // MerkleizeWithMixin is used to merkleize the last group of the hasher
 func (h *Hasher) MerkleizeWithMixin(indx int, num, limit uint64) {
 	input := h.buf[indx:]
+	result := merkleizeInput(input, limit)
 
-	elemCount := len(input) / 32
-	elements := make([][32]byte, elemCount)
-	elemLen := len(elements)
-	for i, j := 0, 0; j < elemLen; i, j = i+32, j+1 {
-		if j == elemLen-1 {
-			copy(elements[j][:], input[i:])
-		}
-		copy(elements[j][:], input[i:i+32])
-	}
-
-	result := merkleizeVector(elements, limit)
-	resultSlice := result[:]
-
-	// mixin with the size
+	// mix in with the size
 	output := h.tmp[:32]
 	for indx := range output {
 		output[indx] = 0
 	}
 	MarshalUint64(output[:0], num)
+	result = h.doHash(result, result, output)
 
-	input = h.doHash(resultSlice, resultSlice, output)
-	h.buf = append(h.buf[:indx], resultSlice...)
+	h.buf = append(h.buf[:indx], result...)
 }
 
 // HashRoot creates the hash final hash root
@@ -452,6 +428,27 @@ func (h *Hasher) merkleizeImpl(dst []byte, input []byte, limit uint64) []byte {
 		res = h.doHash(res, res, zeroHashes[j][:])[:32]
 	}
 	return append(dst, res...)
+}
+
+func merkleizeInput(input []byte, limit uint64) []byte {
+	elemCount := len(input) / 32
+	elements := make([][32]byte, elemCount)
+	elemLen := len(elements)
+	for i, j := 0, 0; j < elemLen; i, j = i+32, j+1 {
+		if j == elemLen-1 {
+			copy(elements[j][:], input[i:])
+		}
+		copy(elements[j][:], input[i:i+32])
+	}
+
+	var result [32]byte
+	if limit == 0 {
+		result = merkleizeVector(elements, uint64(elemLen))
+	} else {
+		result = merkleizeVector(elements, limit)
+	}
+
+	return result[:]
 }
 
 // MerkleizeVector uses our optimized routine to hash a list of 32-byte
