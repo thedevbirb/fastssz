@@ -23,6 +23,8 @@ var zeroHashes [65][32]byte
 var zeroHashLevels map[string]int
 var trueBytes, falseBytes []byte
 
+var EnableVectorizedHTR bool
+
 const (
 	mask0 = ^uint64((1 << (1 << iota)) - 1)
 	mask1
@@ -187,12 +189,20 @@ func (h *Hasher) PutRootVector(b [][]byte, maxCapacity ...uint64) error {
 	}
 
 	if len(maxCapacity) == 0 {
-		h.Merkleize(indx)
+		if EnableVectorizedHTR {
+			h.MerkleizeVectorizedHTR(indx)
+		} else {
+			h.Merkleize(indx)
+		}
 	} else {
 		numItems := uint64(len(b))
 		limit := CalculateLimit(maxCapacity[0], numItems, 32)
 
-		h.MerkleizeWithMixin(indx, numItems, limit)
+		if EnableVectorizedHTR {
+			h.MerkleizeWithMixinVectorizedHTR(indx, numItems, limit)
+		} else {
+			h.MerkleizeWithMixin(indx, numItems, limit)
+		}
 	}
 	return nil
 }
@@ -209,12 +219,20 @@ func (h *Hasher) PutUint64Array(b []uint64, maxCapacity ...uint64) {
 
 	if len(maxCapacity) == 0 {
 		// Array with fixed size
-		h.Merkleize(indx)
+		if EnableVectorizedHTR {
+			h.MerkleizeVectorizedHTR(indx)
+		} else {
+			h.Merkleize(indx)
+		}
 	} else {
 		numItems := uint64(len(b))
 		limit := CalculateLimit(maxCapacity[0], numItems, 8)
 
-		h.MerkleizeWithMixin(indx, numItems, limit)
+		if EnableVectorizedHTR {
+			h.MerkleizeWithMixinVectorizedHTR(indx, numItems, limit)
+		} else {
+			h.MerkleizeWithMixin(indx, numItems, limit)
+		}
 	}
 }
 
@@ -244,7 +262,11 @@ func (h *Hasher) PutBitlist(bb []byte, maxSize uint64) {
 	// merkleize the content with mix in length
 	indx := h.Index()
 	h.AppendBytes32(h.tmp)
-	h.MerkleizeWithMixin(indx, size, (maxSize+255)/256)
+	if EnableVectorizedHTR {
+		h.MerkleizeWithMixinVectorizedHTR(indx, size, (maxSize+255)/256)
+	} else {
+		h.MerkleizeWithMixin(indx, size, (maxSize+255)/256)
+	}
 }
 
 // PutBool appends a boolean
@@ -267,7 +289,11 @@ func (h *Hasher) PutBytes(b []byte) {
 	// merkleize the content
 	indx := h.Index()
 	h.AppendBytes32(b)
-	h.Merkleize(indx)
+	if EnableVectorizedHTR {
+		h.MerkleizeVectorizedHTR(indx)
+	} else {
+		h.Merkleize(indx)
+	}
 }
 
 // Index marks the current buffer index
@@ -278,12 +304,40 @@ func (h *Hasher) Index() int {
 // Merkleize is used to merkleize the last group of the hasher
 func (h *Hasher) Merkleize(indx int) {
 	input := h.buf[indx:]
-	result := merkleizeInput(input, 0)
-	h.buf = append(h.buf[:indx], result...)
+
+	// merkleize the input
+	input = h.merkleizeImpl(input[:0], input, 0)
+	h.buf = append(h.buf[:indx], input...)
 }
 
 // MerkleizeWithMixin is used to merkleize the last group of the hasher
 func (h *Hasher) MerkleizeWithMixin(indx int, num, limit uint64) {
+	input := h.buf[indx:]
+
+	// merkleize the input
+	input = h.merkleizeImpl(input[:0], input, limit)
+
+	// mixin with the size
+	output := h.tmp[:32]
+	for indx := range output {
+		output[indx] = 0
+	}
+	MarshalUint64(output[:0], num)
+
+	input = h.doHash(input, input, output)
+	h.buf = append(h.buf[:indx], input...)
+}
+
+// MerkleizeVectorizedHTR is used to merkleize the input using the gohashtree library
+func (h *Hasher) MerkleizeVectorizedHTR(indx int) {
+	input := h.buf[indx:]
+	result := merkleizeInput(input, 0)
+	h.buf = append(h.buf[:indx], result...)
+}
+
+// MerkleizeWithMixinVectorizedHTR is used to merkleize the the input using the gohashtree library,
+// mixing the result with the size
+func (h *Hasher) MerkleizeWithMixinVectorizedHTR(indx int, num, limit uint64) {
 	input := h.buf[indx:]
 	result := merkleizeInput(input, limit)
 
