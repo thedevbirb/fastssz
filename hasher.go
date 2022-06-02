@@ -485,22 +485,22 @@ func (h *Hasher) merkleizeImpl(dst []byte, input []byte, limit uint64) []byte {
 }
 
 func merkleizeInput(input []byte, limit uint64) []byte {
-	elemCount := len(input) / 32
-	elements := make([][32]byte, elemCount)
-	elemLen := len(elements)
-	for i, j := 0, 0; j < elemLen; i, j = i+32, j+1 {
-		if j == elemLen-1 {
-			copy(elements[j][:], input[i:])
+	elemCount := (len(input) + 31) / 32
+	chunks := make([][32]byte, elemCount)
+	chunkCount := len(chunks)
+	for i, j := 0, 0; j < chunkCount; i, j = i+32, j+1 {
+		if j == chunkCount-1 {
+			copy(chunks[j][:], input[i:])
 		} else {
-			copy(elements[j][:], input[i:i+32])
+			copy(chunks[j][:], input[i:i+32])
 		}
 	}
 
 	var result [32]byte
 	if limit == 0 {
-		result = merkleizeVector(elements, uint64(elemLen))
+		result = merkleizeVector(chunks, uint64(chunkCount))
 	} else {
-		result = merkleizeVector(elements, limit)
+		result = merkleizeVector(chunks, limit)
 	}
 
 	return result[:]
@@ -522,6 +522,7 @@ func merkleizeVector(elements [][32]byte, length uint64) [32]byte {
 			elements = append(elements, zerohash)
 		}
 		outputLen := len(elements) / 2
+		// gohashtree concurrently overwrites elements
 		err := gohashtree.Hash(elements, elements)
 		if err != nil {
 			panic(err)
