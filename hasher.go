@@ -485,9 +485,8 @@ func (h *Hasher) merkleizeImpl(dst []byte, input []byte, limit uint64) []byte {
 }
 
 func merkleizeInput(input []byte, limit uint64) []byte {
-	elemCount := (len(input) + 31) / 32
-	chunks := make([][32]byte, elemCount)
-	chunkCount := len(chunks)
+	chunkCount := (len(input) + 31) / 32
+	chunks := make([][32]byte, chunkCount)
 	for i, j := 0, 0; j < chunkCount; i, j = i+32, j+1 {
 		if j == chunkCount-1 {
 			copy(chunks[j][:], input[i:])
