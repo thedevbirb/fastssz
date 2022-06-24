@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	ssz "github.com/ferranbt/fastssz"
-	"github.com/ferranbt/fastssz/fuzz"
 	"github.com/golang/snappy"
+	ssz "github.com/prysmaticlabs/fastssz"
+	"github.com/prysmaticlabs/fastssz/fuzz"
 
 	"gopkg.in/yaml.v2"
 )

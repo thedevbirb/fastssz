@@ -3,9 +3,9 @@
 package spectests
 
 import (
-	ssz "github.com/ferranbt/fastssz"
-	"github.com/ferranbt/fastssz/spectests/external"
-	external2Alias "github.com/ferranbt/fastssz/spectests/external2"
+	ssz "github.com/prysmaticlabs/fastssz"
+	"github.com/prysmaticlabs/fastssz/spectests/external"
+	"github.com/prysmaticlabs/fastssz/spectests/external2"
 )
 
 // MarshalSSZ ssz marshals the AggregateAndProof object
@@ -152,7 +152,7 @@ func (c *Checkpoint) UnmarshalSSZ(buf []byte) error {
 	}
 
 	// Field (0) 'Epoch'
-	c.Epoch = external2Alias.EpochAlias(ssz.UnmarshallUint64(buf[0:8]))
+	c.Epoch = external2.EpochAlias(ssz.UnmarshallUint64(buf[0:8]))
 
 	// Field (1) 'Root'
 	if cap(c.Root) == 0 {
