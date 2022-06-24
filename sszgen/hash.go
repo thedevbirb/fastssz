@@ -61,9 +61,13 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 
 	var merkleize string
 	if isList {
-		tmpl := `numItems := uint64(len(::.{{.name}}))
-		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit({{.listSize}}, numItems, {{.elemSize}}))`
-
+		tmpl := `
+		numItems := uint64(len(::.{{.name}}))
+		if ssz.EnableVectorizedHTR {
+			hh.MerkleizeWithMixinVectorizedHTR(subIndx, numItems, ssz.CalculateLimit({{.listSize}}, numItems, {{.elemSize}}))
+		} else {
+			hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit({{.listSize}}, numItems, {{.elemSize}}))
+		}`
 		merkleize = execTmpl(tmpl, map[string]interface{}{
 			"name":     v.name,
 			"listSize": v.s,
@@ -75,7 +79,12 @@ func (v *Value) hashRoots(isList bool, elem Type) string {
 			merkleize = "hh.FillUpTo32()\n" + merkleize
 		}
 	} else {
-		merkleize = "hh.Merkleize(subIndx)"
+		merkleize = `
+		if ssz.EnableVectorizedHTR { 
+			hh.MerkleizeVectorizedHTR(subIndx)
+		} else {
+			hh.Merkleize(subIndx)
+		}`
 	}
 
 	tmpl := `{
@@ -138,7 +147,11 @@ func (v *Value) hashTreeRoot(name string, appendBytes bool) string {
 		return
     }
 	hh.{{.hashMethod}}({{.name}})
-	hh.MerkleizeWithMixin(elemIndx, byteLen, ({{.maxLen}}+31)/32)
+	if ssz.EnableVectorizedHTR {
+		hh.MerkleizeWithMixinVectorizedHTR(elemIndx, byteLen, ({{.maxLen}}+31)/32)
+	} else {
+		hh.MerkleizeWithMixin(elemIndx, byteLen, ({{.maxLen}}+31)/32)
+	}
 }`
 			return execTmpl(tmpl, map[string]interface{}{
 				"hashMethod": hMethod,
@@ -190,7 +203,11 @@ func (v *Value) hashTreeRoot(name string, appendBytes bool) string {
 			for _, elem := range {{.name}} {
 {{.htrCall}}
 			}
-			hh.MerkleizeWithMixin(subIndx, num, {{.num}})
+			if ssz.EnableVectorizedHTR {
+				hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, {{.num}})
+			} else {
+				hh.MerkleizeWithMixin(subIndx, num, {{.num}})
+			}
 		}`
 		var htrCall string
 		if v.e.t == TypeBytes {
@@ -234,8 +251,12 @@ func (v *Value) hashTreeRootContainer(start bool) string {
 	tmpl := `indx := hh.Index()
 
 	{{.fields}}
-
-	hh.Merkleize(indx)`
+	
+	if ssz.EnableVectorizedHTR {
+		hh.MerkleizeVectorizedHTR(indx)
+	} else {
+		hh.Merkleize(indx)
+	}`
 
 	return execTmpl(tmpl, map[string]interface{}{
 		"fields": strings.Join(out, "\n"),
