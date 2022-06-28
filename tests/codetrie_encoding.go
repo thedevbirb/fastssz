@@ -16,8 +16,8 @@ func (m *Metadata) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = ssz.MarshalUint8(dst, m.Version)
 
 	// Field (1) 'CodeHash'
-	if len(m.CodeHash) != 32 {
-		err = ssz.ErrBytesLength
+	if size := len(m.CodeHash); size != 32 {
+		err = ssz.ErrBytesLengthFn("Metadata.CodeHash", size, 32)
 		return
 	}
 	dst = append(dst, m.CodeHash...)
@@ -70,8 +70,8 @@ func (m *Metadata) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	hh.PutUint8(m.Version)
 
 	// Field (1) 'CodeHash'
-	if len(m.CodeHash) != 32 {
-		err = ssz.ErrBytesLength
+	if size := len(m.CodeHash); size != 32 {
+		err = ssz.ErrBytesLengthFn("Metadata.CodeHash", size, 32)
 		return
 	}
 	hh.PutBytes(m.CodeHash)
@@ -129,8 +129,8 @@ func (c *Chunk) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = ssz.MarshalUint8(dst, c.FIO)
 
 	// Field (1) 'Code'
-	if len(c.Code) != 32 {
-		err = ssz.ErrBytesLength
+	if size := len(c.Code); size != 32 {
+		err = ssz.ErrBytesLengthFn("Chunk.Code", size, 32)
 		return
 	}
 	dst = append(dst, c.Code...)
@@ -177,8 +177,8 @@ func (c *Chunk) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	hh.PutUint8(c.FIO)
 
 	// Field (1) 'Code'
-	if len(c.Code) != 32 {
-		err = ssz.ErrBytesLength
+	if size := len(c.Code); size != 32 {
+		err = ssz.ErrBytesLengthFn("Chunk.Code", size, 32)
 		return
 	}
 	hh.PutBytes(c.Code)
@@ -236,8 +236,8 @@ func (c *CodeTrieSmall) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	offset += len(c.Chunks) * 33
 
 	// Field (1) 'Chunks'
-	if len(c.Chunks) > 4 {
-		err = ssz.ErrListTooBig
+	if size := len(c.Chunks); size > 4 {
+		err = ssz.ErrListTooBigFn("CodeTrieSmall.Chunks", size, 4)
 		return
 	}
 	for ii := 0; ii < len(c.Chunks); ii++ {
@@ -399,8 +399,8 @@ func (c *CodeTrieBig) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	offset += len(c.Chunks) * 33
 
 	// Field (1) 'Chunks'
-	if len(c.Chunks) > 1024 {
-		err = ssz.ErrListTooBig
+	if size := len(c.Chunks); size > 1024 {
+		err = ssz.ErrListTooBigFn("CodeTrieBig.Chunks", size, 1024)
 		return
 	}
 	for ii := 0; ii < len(c.Chunks); ii++ {
