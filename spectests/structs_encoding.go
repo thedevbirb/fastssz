@@ -3009,7 +3009,7 @@ func (b *BeaconState) HashTreeRootWith(hh ssz.HashWalker) (err error) {
 			hh.Append(i)
 		}
 		numItems := uint64(len(b.HistoricalRoots))
-		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(16777216, numItems, 32))
+		hh.MerkleizeWithMixin(subIndx, numItems, 16777216)
 	}
 
 	// Field (8) 'Eth1Data'
@@ -5137,7 +5137,7 @@ func (b *BeaconStateAltair) HashTreeRootWith(hh ssz.HashWalker) (err error) {
 			hh.Append(i)
 		}
 		numItems := uint64(len(b.HistoricalRoots))
-		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(16777216, numItems, 32))
+		hh.MerkleizeWithMixin(subIndx, numItems, 16777216)
 	}
 
 	// Field (8) 'Eth1Data'
@@ -5963,7 +5963,7 @@ func (b *BeaconStateBellatrix) HashTreeRootWith(hh ssz.HashWalker) (err error) {
 			hh.Append(i)
 		}
 		numItems := uint64(len(b.HistoricalRoots))
-		hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(16777216, numItems, 32))
+		hh.MerkleizeWithMixin(subIndx, numItems, 16777216)
 	}
 
 	// Field (8) 'Eth1Data'
