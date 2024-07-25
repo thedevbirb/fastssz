@@ -207,11 +207,9 @@ type ErrorResponse struct {
 	Message external.DynamicBytes `ssz-max:"256"`
 }
 
-type Dummy struct {
-}
+type Dummy struct{}
 
-type Interface interface {
-}
+type Interface interface{}
 
 type SyncCommittee struct {
 	PubKeys          [][]byte     `json:"pubkeys" ssz-size:"1024,48"`
@@ -258,4 +256,9 @@ type BeaconBlockMinimal struct {
 	ParentRoot    []byte                  `json:"parent_root" ssz-size:"32"`
 	StateRoot     []byte                  `json:"state_root" ssz-size:"32"`
 	Body          *BeaconBlockBodyMinimal `json:"body"`
+}
+
+// ExecutionPayloadTransactions provides information about transactions.
+type ExecutionPayloadTransactions struct {
+	Transactions [][]byte `ssz-max:"1048576,1073741824" ssz-size:"?,?"`
 }
