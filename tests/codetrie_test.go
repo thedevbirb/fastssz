@@ -229,7 +229,7 @@ func TestVerifyCodeTrieMultiProof2(t *testing.T) {
 
 	bellatrixPayloadTxs := spectests.ExecutionPayloadTransactions{Transactions: byteTxs}
 
-	rootNode, err := bellatrixPayloadTxs.GetTree()
+	rootNode, err := ssz.ProofTree(&bellatrixPayloadTxs)
 	if err != nil {
 		t.Errorf("Failed to construct tree for transactions: %v\n", err)
 	}
